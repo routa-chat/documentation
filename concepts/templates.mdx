@@ -1,0 +1,145 @@
+---
+title: "Templates"
+description: "Como submeter, acompanhar a aprovação e enviar templates de WhatsApp, incluindo cabeçalho, rodapé e botões."
+---
+
+Um **template** é um corpo de mensagem reutilizável que o WhatsApp precisa aprovar antes de você poder enviá-lo. Use templates para mensagens que a sua empresa inicia, como confirmações de pedido, lembretes e códigos de verificação.
+
+A Routa submete o template e acompanha o resultado. **A aprovação é decidida pelo provedor, no tempo dele.** Um template pertence a um **canal**: o mesmo nome pode estar aprovado em um canal e rejeitado em outro.
+
+## Ciclo de vida
+
+```text
+draft → submitted → pending → approved
+                            → rejected
+approved → paused | disabled   (o provedor pode fazer isso a qualquer momento)
+```
+
+| Status | Significado |
+| --- | --- |
+| `draft` | Criado, ainda não enviado para análise. |
+| `submitted` | Enviado ao provedor. |
+| `pending` | Em análise. |
+| `approved` | Aprovado. **Somente templates aprovados podem ser usados para enviar.** |
+| `rejected` | Rejeitado. O campo `rejection_reason` explica o motivo. |
+| `paused` | Pausado pelo provedor, por exemplo por baixa qualidade. Não pode ser usado para enviar. |
+| `disabled` | Desativado pelo provedor. |
+
+Cada mudança gera um evento (`template.submitted`, `template.pending`, `template.approved`, `template.rejected`, `template.paused`, `template.disabled`). Assine `template.*` para acompanhar a aprovação sem consultar a API.
+
+### Motivos de rejeição
+
+`rejection_reason` usa um conjunto fechado de valores da Routa, não os códigos do provedor.
+
+| Valor | Descrição |
+| --- | --- |
+| `abusive_content` | Conteúdo abusivo. |
+| `incorrect_category` | A categoria escolhida não corresponde ao conteúdo. |
+| `invalid_format` | Formato inválido. |
+| `scam` | Suspeita de golpe. |
+| `tag_content_mismatch` | O conteúdo não corresponde à etiqueta declarada. |
+| `other` | Outro motivo. |
+
+## Submeter um template
+
+`POST /v1/templates` cria o template e o envia para análise. Informe o canal, o nome, o idioma, a categoria e o corpo com variáveis posicionais `{{1}}`, `{{2}}`.
+
+```bash
+curl https://api.routa.chat/v1/templates \
+  -H "Authorization: Bearer $ROUTA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "channel": "chan_01J8...",
+    "name": "confirmacao_pedido",
+    "language": "pt_BR",
+    "category": "utility",
+    "body_text": "Olá {{1}}! Seu pedido {{2}} foi confirmado."
+  }'
+```
+
+| Campo | Descrição |
+| --- | --- |
+| `channel` | Canal ao qual o template pertence. |
+| `name` | Nome do template. |
+| `language` | Código de idioma, por exemplo `pt_BR` ou `en_US`. |
+| `category` | `marketing`, `utility` ou `authentication`. |
+| `body_text` | Corpo com placeholders posicionais `{{1}}`, `{{2}}`, … |
+| `components` | Opcional. Cabeçalho, rodapé e botões. Veja abaixo. |
+
+A resposta retorna o template com `variables` (a lista de placeholders do corpo) e o `status` atual.
+
+## Componentes ricos
+
+O campo opcional `components` aceita três slots, todos opcionais. Quando o template é só texto, omita `components` por completo.
+
+```json
+{
+  "components": {
+    "header": { "kind": "text", "text": "Pedido {{1}}" },
+    "footer": { "text": "Obrigado por comprar conosco" },
+    "buttons": [
+      { "kind": "quick_reply", "text": "Confirmar" },
+      { "kind": "phone_number", "text": "Ligar", "phone_number": "+5581999999999" },
+      { "kind": "url", "text": "Acompanhar", "url": "https://exemplo.com/pedidos/{{1}}" }
+    ]
+  }
+}
+```
+
+### Cabeçalho
+
+| `kind` | Campos | Regras |
+| --- | --- | --- |
+| `text` | `text` | No máximo 60 caracteres e no máximo uma variável `{{1}}`. |
+| `media` | `media_id` | Referencia uma mídia enviada antes por [`POST /v1/templates/media`](/api-reference/endpoint/templates/upload-media). |
+
+Para um cabeçalho de mídia, envie primeiro o arquivo e use o `id` retornado:
+
+```bash
+curl https://api.routa.chat/v1/templates/media \
+  -H "Authorization: Bearer $ROUTA_API_KEY" \
+  -H "Content-Type: image/png" \
+  --data-binary @banner.png
+```
+
+| Formato | Tipos aceitos | Tamanho máximo |
+| --- | --- | --- |
+| `image` | `image/jpeg`, `image/png` | 5 MB |
+| `video` | `video/mp4` | 16 MB |
+| `document` | `application/pdf` | 100 MB |
+
+O formato é deduzido do `Content-Type` do envio.
+
+### Rodapé
+
+Um objeto `{ "text": "..." }` com até 60 caracteres.
+
+### Botões
+
+Até **10 botões**, na ordem em que você os enviar. O texto de cada botão tem no máximo 25 caracteres.
+
+| `kind` | Campos extras | Regras |
+| --- | --- | --- |
+| `quick_reply` | n/d | Resposta rápida. |
+| `phone_number` | `phone_number` | No máximo um botão desse tipo por template. |
+| `url` | `url` | A URL pode conter exatamente uma variável `{{1}}`. |
+
+Um componente fora dessas regras retorna `422` com o código `template_components_invalid`.
+
+## Enviar um template
+
+Com o template `approved`, envie-o em `POST /v1/messages` informando o `id` e os valores dos placeholders, na ordem:
+
+```json
+{
+  "channel": "chan_01J8...",
+  "to": "+5581999999999",
+  "template": { "id": "tmpl_01J8...", "body_parameters": ["Ana", "#1234"] }
+}
+```
+
+`text` e `template` são mutuamente exclusivos. A quantidade de `body_parameters` precisa ser igual à de variáveis do template. Veja o passo a passo em [Enviar um template](/guides/send-template-message).
+
+<Warning>
+  A Routa verifica o template **no aceite**. Se ele não estiver aprovado, a chamada falha na hora com `template_not_approved` (ou `template_paused`), em vez de gerar um `message.failed` depois.
+</Warning>

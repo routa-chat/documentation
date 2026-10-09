@@ -33,7 +33,8 @@
             "pages": [
               "concepts/data-model",
               "concepts/messages",
-              "concepts/events"
+              "concepts/events",
+              "concepts/templates"
             ]
           }
         ]
