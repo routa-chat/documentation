@@ -32,7 +32,8 @@
             "group": "Conceitos",
             "pages": [
               "concepts/data-model",
-              "concepts/messages"
+              "concepts/messages",
+              "concepts/events"
             ]
           }
         ]

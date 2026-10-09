@@ -1,0 +1,110 @@
+---
+title: "Eventos"
+description: "O log de eventos normalizados da Routa: formato, tipos, versionamento e como consumi-los com segurança."
+---
+
+Cada mudança relevante gera um **evento**: um fato imutável sobre um recurso. Webhooks, o painel e a contabilização de uso leem desse mesmo log. Você consome eventos de duas formas:
+
+- **Webhooks:** a Routa envia cada evento ao seu endpoint HTTPS. Veja [Webhooks](/webhooks/overview).
+- **Consulta:** `GET /v1/events` lista eventos e é o caminho de reconciliação se você perdeu entregas.
+
+## O objeto evento
+
+```json
+{
+  "id": "evt_01J8ZK9M3Q7X...",
+  "type": "message.delivered",
+  "api_version": "v1",
+  "schema_version": 1,
+  "project_id": "proj_01J8...",
+  "sequence": 918273,
+  "occurred_at": "2026-09-04T13:22:41.031Z",
+  "recorded_at": "2026-09-04T13:22:41.244Z",
+  "data": {
+    "id": "msg_01J8...",
+    "channel": "chan_01J8...",
+    "direction": "outbound",
+    "status": "delivered",
+    "...": "..."
+  }
+}
+```
+
+| Campo | Descrição |
+| --- | --- |
+| `id` | Identificador global do evento. É a **chave de deduplicação** e permanece igual em reentregas. |
+| `type` | Tipo no formato `recurso.ação_no_passado`. |
+| `api_version` | Versão do formato público do recurso em `data`. Hoje, `v1`. |
+| `schema_version` | Versão do envelope do evento. Hoje, `1`. |
+| `project_id` | Projeto dono do evento. |
+| `sequence` | Número monotônico, útil para detectar lacunas. **Não** é uma promessa de ordem de entrega. |
+| `occurred_at` | Quando o fato ocorreu. |
+| `recorded_at` | Quando a Routa registrou o evento. |
+| `data` | O recurso **inteiro no estado atual**, não um diff. |
+
+Como `data` traz o recurso completo, um consumidor que processa apenas o último evento de cada recurso converge para o estado correto.
+
+## Tipos de evento
+
+| Tipo | Quando ocorre | `data` |
+| --- | --- | --- |
+| `message.accepted` | A Routa aceitou uma mensagem enviada. | [Mensagem](/concepts/messages) |
+| `message.sent` | O provedor aceitou a mensagem. | Mensagem |
+| `message.delivered` | A entrega ao destinatário foi confirmada. | Mensagem |
+| `message.read` | O destinatário leu a mensagem. | Mensagem |
+| `message.failed` | A mensagem falhou de forma terminal. | Mensagem |
+| `message.received` | Uma mensagem foi recebida de um cliente. | Mensagem |
+| `channel.status_changed` | O status de um canal mudou. | `channel_id`, `status`, `previous_status` |
+| `template.submitted` | Um template foi enviado para aprovação. | [Template](/concepts/templates) |
+| `template.pending` | A análise do template está em andamento. | Template |
+| `template.approved` | O template foi aprovado. | Template |
+| `template.rejected` | O template foi rejeitado. | Template |
+| `template.paused` | O provedor pausou o template. | Template |
+| `template.disabled` | O provedor desativou o template. | Template |
+
+Veja os detalhes de cada tipo em [Tipos de evento](/webhooks/event-types).
+
+<Note>
+  Novos tipos de evento podem surgir a qualquer momento. Por isso, cada endpoint de webhook assina uma lista explícita de tipos (por exemplo `message.delivered`) ou um curinga por recurso (`message.*`). Ignore tipos que seu código não reconhece.
+</Note>
+
+## Semântica de entrega
+
+A entrega é **pelo menos uma vez** (*at-least-once*), **sem garantia de ordem global**. Seu consumidor precisa:
+
+<Steps>
+  <Step title="Deduplicar por id">
+    Guarde os `id` de eventos já processados (um conjunto com TTL de 24 horas costuma bastar) e ignore repetidos.
+  </Step>
+  <Step title="Ignorar o desconhecido">
+    Ignore tipos de evento e campos que você não reconhece.
+  </Step>
+  <Step title="Tratar o status como monotônico">
+    Nunca rebaixe uma mensagem de `read` para `sent` só porque um evento mais antigo chegou depois. Compare o `status` ou use `occurred_at`.
+  </Step>
+</Steps>
+
+O SDK oficial já ajuda com isso: eventos de tipos desconhecidos são interpretados como um evento genérico em vez de causar erro. Veja [Webhooks no SDK](/sdk/webhooks).
+
+## Consultar eventos perdidos
+
+Se seu servidor ficou fora do ar, não é preciso pedir reenvio ao suporte. Liste os eventos a partir do último que você processou:
+
+<CodeGroup>
+```bash cURL
+curl "https://api.routa.chat/v1/events?after=evt_01J8...&type=message.failed&limit=100" \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+```ts Node.js
+for await (const event of routa.events.list({ after: 'evt_01J8...' })) {
+  console.log(event.type)
+}
+```
+</CodeGroup>
+
+O cursor é o próprio id do evento (`after`). A resposta traz `has_more` e `next_cursor`. Veja [`GET /v1/events`](/api-reference/endpoint/events/list) e [Reconciliar eventos](/webhooks/reconciliation).
+
+## Retenção
+
+Os eventos ficam disponíveis por **90 dias**.
