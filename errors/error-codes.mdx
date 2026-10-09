@@ -1,0 +1,116 @@
+---
+title: "Códigos de erro"
+description: "Catálogo dos códigos de erro da API de dados da Routa, com status HTTP, causa provável e como resolver."
+---
+
+Este catálogo lista os códigos que as rotas da API pública (autenticadas por chave de API) podem retornar. O campo `error.code` é estável: use-o na sua lógica, não o texto de `message`. Veja o [formato do erro](/errors/overview).
+
+## Autenticação e permissão
+
+| Código | Status | Causa e solução |
+| --- | --- | --- |
+| `api_key_invalid` | `401` | Chave ausente, malformada, revogada ou expirada, ou requisição vinda de um IP fora da lista permitida. Veja [Chaves de API](/authentication). |
+| `insufficient_scope` | `403` | A chave não tem o escopo exigido pela rota. Crie uma chave com o escopo necessário. |
+
+## Cobrança
+
+| Código | Status | Causa e solução |
+| --- | --- | --- |
+| `message_quota_exceeded` | `402` | A franquia de mensagens do período acabou. `details` traz `limit`, `used` e `resets_at`. Aguarde a renovação, ative o excedente ou troque de plano. Veja [Planos e franquia](/billing/plans-and-quota). |
+| `subscription_required` | `402` | A organização não tem uma assinatura ativa para enviar de projetos de produção. |
+| `payment_failed` | `402` | O pagamento da assinatura falhou e o período de tolerância acabou. Atualize a forma de pagamento no painel. |
+
+<Warning>
+  Não retente um `402` esperando que passe sozinho. Esperar não aumenta a franquia. Resolva a causa no plano e então reenvie.
+</Warning>
+
+## Recurso não encontrado (404)
+
+Um recurso de outro projeto também retorna `404`, para não revelar que ele existe.
+
+| Código | Causa |
+| --- | --- |
+| `channel_not_found` | O canal não existe neste projeto. |
+| `message_not_found` | A mensagem não existe neste projeto. |
+| `event_not_found` | O id usado em `after` não corresponde a nenhum evento do projeto. |
+| `template_not_found` | O template não existe neste projeto. |
+| `template_media_not_found` | A mídia de cabeçalho informada não existe. |
+| `media_not_found` | O objeto de mídia não existe. |
+| `webhook_endpoint_not_found` | O endpoint de webhook não existe. |
+| `webhook_delivery_not_found` | A entrega de webhook não existe. |
+
+## Conflitos (409)
+
+| Código | Causa e solução |
+| --- | --- |
+| `idempotency_in_progress` | Há uma requisição com a mesma `Idempotency-Key` ainda em andamento. Tente de novo após `Retry-After`. |
+| `idempotency_key_reuse` | A chave já foi usada com um corpo diferente. Use uma chave nova para uma mensagem nova. |
+| `webhook_delivery_not_replayable` | Só entregas `exhausted` podem ser reenviadas. |
+
+## Limites de taxa e capacidade (429)
+
+| Código | Causa e solução |
+| --- | --- |
+| `rate_limit_exceeded` | Limite de requisições do projeto. Aguarde `Retry-After`. Veja [Limites de taxa](/reliability/rate-limits). |
+| `channel_backlog_exceeded` | A fila de envio do canal está acima da capacidade. Tente de novo em instantes. |
+
+## Requisição inválida (422)
+
+### Mensagens
+
+| Código | Causa e solução |
+| --- | --- |
+| `channel_inactive` | O canal não está `active`. Verifique o status no painel. |
+| `capability_unsupported` | O canal não suporta esse tipo de conteúdo. |
+| `invalid_recipient` | O formato do número é válido, mas ele não pode existir no país indicado. |
+| `content_rejected` | Conteúdo inválido: informe exatamente um entre `text` e `template`, e a quantidade certa de `body_parameters`. |
+| `message_direction_invalid` | A operação só vale para mensagens `inbound`, como marcar como lida. |
+| `invalid_cursor` | O `cursor` não é válido. Use o `next_cursor` devolvido pela API. |
+
+### Templates
+
+| Código | Causa e solução |
+| --- | --- |
+| `template_not_approved` | O template ainda não foi aprovado, ou foi rejeitado ou desativado. |
+| `template_paused` | O provedor pausou o template. |
+| `template_variables_invalid` | As variáveis `{{n}}` do corpo são inválidas (por exemplo, fora de sequência). |
+| `template_components_invalid` | Cabeçalho, rodapé ou botões violam as regras de componentes. Veja [Templates](/concepts/templates#componentes-ricos). |
+| `template_media_invalid` | O arquivo do cabeçalho está ausente, sem `Content-Type` ou tem tipo ou tamanho inválido. |
+
+### Mídia
+
+| Código | Causa e solução |
+| --- | --- |
+| `media_not_ready` | A mídia ainda está `pending` ou está `unavailable`. |
+| `media_source_url_invalid` | Um corpo JSON precisa de uma `source_url` não vazia. |
+| `media_source_blocked` | A URL aponta para um endereço privado ou reservado. |
+| `media_source_unreachable` | A Routa não conseguiu baixar a URL (timeout ou resposta de erro). |
+| `media_content_type_rejected` | Tipo de arquivo não suportado. Veja [Mídia](/concepts/media). |
+| `media_size_limit_exceeded` | O arquivo excede o limite do tipo. |
+
+### Webhooks
+
+| Código | Causa e solução |
+| --- | --- |
+| `invalid_webhook_url` | A URL não é HTTPS, aponta para um endereço privado ou não resolve. |
+| `invalid_subscribed_types` | `subscribed_types` precisa ser uma lista não vazia de tipos válidos ou curingas como `message.*`. |
+| `too_many_webhook_endpoints` | O projeto atingiu o máximo de 5 endpoints. |
+
+### Uso
+
+| Código | Causa e solução |
+| --- | --- |
+| `usage_range_invalid` | O intervalo `from`/`to` é inválido. Use datas `YYYY-MM-DD`, com `from` anterior a `to`. |
+
+## Perímetro HTTP
+
+| Código | Status | Causa e solução |
+| --- | --- | --- |
+| `payload_too_large` | `413` | O corpo excede o limite da rota. |
+| `length_required` | `411` | A rota exige `Content-Length`. Corpos chunked não são aceitos. |
+
+## Erros do servidor
+
+| Código | Status | Causa e solução |
+| --- | --- | --- |
+| `service_unavailable` | `503` | A Routa não consegue processar agora, por exemplo por indisponibilidade da infraestrutura. Nada foi gravado. Tente de novo em instantes, com a mesma `Idempotency-Key`. |

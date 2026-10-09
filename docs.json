@@ -69,7 +69,8 @@
           {
             "group": "Erros",
             "pages": [
-              "errors/overview"
+              "errors/overview",
+              "errors/error-codes"
             ]
           }
         ]
