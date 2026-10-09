@@ -168,6 +168,12 @@
               "sdk/webhooks",
               "sdk/pagination"
             ]
+          },
+          {
+            "group": "Guias",
+            "pages": [
+              "sdk/error-handling"
+            ]
           }
         ]
       }

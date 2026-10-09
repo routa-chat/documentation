@@ -1,0 +1,117 @@
+---
+title: "Tratamento de erros"
+description: "As classes de erro do SDK, os campos que elas carregam e como tratar autenticação, validação, limite de taxa e cobrança."
+---
+
+Todo erro que a API devolve como resposta HTTP é lançado como `RoutaApiError` ou uma de suas subclasses. Todas carregam:
+
+| Campo | Descrição |
+| --- | --- |
+| `code` | Código estável do erro, como `channel_inactive`. Veja [Códigos de erro](/errors/error-codes). |
+| `statusCode` | Status HTTP da resposta. |
+| `requestId` | Identificador da requisição. Cite-o ao falar com o suporte. |
+| `docUrl` | Link da documentação do erro, quando a API enviou um. |
+| `message` | Texto do erro, em inglês. |
+
+## Classes de erro
+
+| Status HTTP | Classe | Campos extras |
+| --- | --- | --- |
+| `401` | `RoutaAuthenticationError` | n/d |
+| `403`, `404`, `422` | `RoutaInvalidRequestError` | `param`: o campo da requisição com problema, quando conhecido |
+| `429` | `RoutaRateLimitError` | `retryAfter`: segundos a esperar, quando o servidor enviou |
+| Qualquer outro (`402`, `409`, `5xx`…) | `RoutaApiError` | n/d |
+
+```ts
+import {
+  RoutaApiError,
+  RoutaAuthenticationError,
+  RoutaInvalidRequestError,
+  RoutaRateLimitError,
+} from '@routa-chat/sdk'
+
+try {
+  await routa.messages.send({
+    channel: 'chan_...',
+    to: '+5581999999999',
+    text: 'Olá!',
+  })
+} catch (error) {
+  if (error instanceof RoutaAuthenticationError) {
+    // Chave ausente, inválida ou revogada. Tentar de novo não ajuda.
+  } else if (error instanceof RoutaRateLimitError) {
+    console.warn(`Rate limited; retry in ${error.retryAfter ?? '?'}s`)
+  } else if (error instanceof RoutaInvalidRequestError) {
+    console.error(`Rejected (${error.code}) on field ${error.param ?? 'n/a'}: ${error.message}`)
+  } else if (error instanceof RoutaApiError) {
+    console.error(error.statusCode, error.code, error.requestId)
+  } else {
+    throw error
+  }
+}
+```
+
+<Note>
+  Uma subclasse também é um `RoutaApiError`. Teste as subclasses mais específicas primeiro, como no exemplo acima.
+</Note>
+
+## Tratando casos de negócio
+
+Use o `code` para decidir o que fazer, não o texto da mensagem.
+
+```ts
+try {
+  await routa.messages.send(params)
+} catch (error) {
+  if (!(error instanceof RoutaApiError)) throw error
+
+  switch (error.code) {
+    case 'message_quota_exceeded':
+      // 402: a franquia do período acabou. Enfileire do seu lado e avise o time.
+      break
+    case 'channel_inactive':
+    case 'template_not_approved':
+      // 422: corrija a configuração antes de tentar de novo.
+      break
+    case 'invalid_recipient':
+      // 422: o número não existe. Marque o contato como inválido.
+      break
+    default:
+      throw error
+  }
+}
+```
+
+<Warning>
+  Um `402` chega como `RoutaApiError`, não como uma subclasse. Trate `message_quota_exceeded` por `code` e não programe retentativas automáticas: esperar não aumenta a franquia. Veja [Planos e franquia](/billing/plans-and-quota).
+</Warning>
+
+## O que o SDK já retenta
+
+Falhas de rede, `429`, `5xx` e um `409 idempotency_in_progress` são retentados automaticamente, até `maxRetries` vezes. Só o erro final chega ao seu `catch`. `401`, `403`, `404` e `422` nunca são retentados. Veja [Configuração](/sdk/configuration#retentativas).
+
+## O que não é um `RoutaApiError`
+
+Duas situações não passam por essas classes:
+
+- **Falhas de rede e timeouts**, depois que as retentativas acabam, rejeitam com um `Error` simples cujo `name` é `'HttpRequestError'`. A classe ainda não é exportada, então verifique `error.name` em vez de usar `instanceof`.
+- **Configuração inválida**, como uma `apiKey` vazia, lança um `Error` simples e síncrono no construtor `Routa`.
+
+```ts
+try {
+  await routa.messages.send(params)
+} catch (error) {
+  if (error instanceof Error && error.name === 'HttpRequestError') {
+    // A rede falhou depois de todas as retentativas. A mensagem pode ou não ter sido criada:
+    // repita com a mesma idempotencyKey.
+  }
+}
+```
+
+<Info>
+  Uma falha de validação de schema (por exemplo, um campo obrigatório ausente) chega como `RoutaInvalidRequestError` com o código `unknown_error`, porque a resposta não vem no formato de erro da Routa. Veja [Erros de validação de schema](/errors/overview).
+</Info>
+
+## Falhas de entrega
+
+Uma falha do provedor **não** vira exceção em `messages.send()`: a mensagem é aceita e a falha aparece depois, de forma assíncrona, como o evento `message.failed`. A classe `RoutaProviderError` existe para um uso futuro e nenhum código do SDK a lança hoje.
