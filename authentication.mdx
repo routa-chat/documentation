@@ -1,0 +1,155 @@
+---
+title: "Chaves de API"
+description: "Como autenticar suas requisições à API da Routa, quais escopos cada rota exige e como manter suas chaves seguras."
+---
+
+<Tip>
+  A chave de API é a credencial de acesso do seu projeto. Sem uma chave válida, nenhuma requisição à API é aceita.
+</Tip>
+
+Toda requisição à API pública (`/v1`) é autenticada com uma chave de API enviada no header `Authorization`, no formato `Bearer`:
+
+```http
+Authorization: Bearer rt_live_...
+```
+
+Cada chave pertence a **um único projeto**. Não existe chave "para todos os projetos": tudo o que a chave lê ou escreve fica dentro desse projeto. Para acessar outro projeto, use a chave dele.
+
+## Formato da chave
+
+```text
+rt_{live|test}_{segredo}
+```
+
+| Prefixo | Ambiente |
+| --- | --- |
+| `rt_live_` | Projeto de produção. |
+| `rt_test_` | Projeto de teste. Veja [Ambientes](/environments). |
+
+A chave é gerada com um gerador criptográfico e **exibida uma única vez**, no momento da criação. A Routa guarda apenas um hash dela, então não é possível recuperá-la depois. Se perder a chave, crie outra e revogue a antiga.
+
+## O que você pode fazer com suas chaves
+
+- Criar uma ou mais chaves por projeto, cada uma com os escopos mínimos de que a integração precisa.
+- Definir uma data de expiração e uma lista de IPs permitidos para a chave.
+- Rotacionar uma chave sem downtime: a nova chave é criada e a antiga continua válida até você revogá-la.
+- Revogar uma chave comprometida. A revogação vale em cerca de um segundo.
+- Ver a data do último uso de cada chave e identificar as que estão paradas.
+
+<Info>
+  A criação, a rotação e a revogação de chaves são ações do painel (**Configurações → Chaves de API**), autenticadas por sessão de usuário. Elas não usam chave de API.
+</Info>
+
+## Escopos
+
+Cada chave carrega um conjunto fechado de **escopos**. Uma chave nova nasce com o mínimo que você solicitou, nunca com acesso total. Se a rota exige um escopo que a chave não tem, a API responde `403` com o código `insufficient_scope`.
+
+| Escopo | Permite |
+| --- | --- |
+| `messages:write` | Enviar mensagens e marcar mensagens recebidas como lidas. |
+| `messages:read` | Consultar e listar mensagens. |
+| `events:read` | Listar eventos (`GET /v1/events`). |
+| `webhooks:write` | Gerenciar endpoints de webhook, segredos e entregas. É o único escopo desse recurso, inclusive para leituras. |
+| `templates:write` | Submeter templates e enviar mídia de cabeçalho de template. |
+| `templates:read` | Consultar e listar templates. |
+| `media:write` | Enviar ou hospedar mídia. |
+| `media:read` | Consultar um objeto de mídia. |
+| `usage:read` | Consultar o uso medido do projeto. |
+| `channels:read`, `channels:write` | Reservados para uma futura rota de canais por chave de API. Nenhuma rota os exige hoje. |
+
+### Escopo exigido por rota
+
+| Rota | Escopo |
+| --- | --- |
+| `POST /v1/messages` | `messages:write` |
+| `GET /v1/messages`, `GET /v1/messages/{id}` | `messages:read` |
+| `POST /v1/messages/{id}/read` | `messages:write` |
+| `GET /v1/events` | `events:read` |
+| `/v1/webhook_endpoints` e sub-rotas | `webhooks:write` |
+| `POST /v1/templates`, `POST /v1/templates/media` | `templates:write` |
+| `GET /v1/templates`, `GET /v1/templates/{id}` | `templates:read` |
+| `POST /v1/media` | `media:write` |
+| `GET /v1/media/{id}` | `media:read` |
+| `GET /v1/usage` | `usage:read` |
+| `GET /v1/whoami` | Qualquer chave válida. |
+
+<Note>
+  A página de cada endpoint na [Referência da API](/api-reference/introduction) mostra o escopo necessário.
+</Note>
+
+## Verifique uma chave
+
+`GET /v1/whoami` não tem efeitos colaterais. Ele retorna a organização, o projeto, o `id` da chave e os escopos que ela possui.
+
+<CodeGroup>
+```bash cURL
+curl https://api.routa.chat/v1/whoami \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+```ts Node.js
+const identity = await routa.whoami()
+console.log(identity.projectId, identity.scopes)
+```
+</CodeGroup>
+
+```json Resposta
+{
+  "organization_id": "org_01J8...",
+  "project_id": "proj_01J8...",
+  "api_key_id": "key_01J8...",
+  "scopes": ["messages:read", "messages:write"]
+}
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="401 Unauthorized: o que verificar">
+    A API responde `401` com `type: "authentication_error"` e o código `api_key_invalid`. Verifique, nesta ordem:
+
+    1. O header é exatamente `Authorization: Bearer <chave>`, com a palavra `Bearer` e um espaço.
+    2. A chave foi copiada inteira, sem espaços ou quebras de linha no início ou no fim.
+    3. A chave não foi revogada nem expirou.
+    4. A requisição sai de um IP permitido, se a chave tem lista de IPs.
+    5. A variável de ambiente que guarda a chave está definida no processo que faz a chamada.
+
+    Para testar, chame o endpoint de identidade:
+
+    ```bash
+    curl -i https://api.routa.chat/v1/whoami \
+      -H "Authorization: Bearer $ROUTA_API_KEY"
+    ```
+  </Accordion>
+  <Accordion title="403 insufficient_scope: escopo ausente">
+    A chave é válida, mas não tem o escopo que a rota exige. A mensagem de erro informa qual. Os escopos de uma chave não mudam depois de criada: crie uma nova chave com o escopo necessário, troque na sua integração e revogue a antiga.
+  </Accordion>
+  <Accordion title="Recebo 404 para um recurso que existe">
+    Um recurso de outro projeto responde `404`, nunca `403`, para não revelar que ele existe. Confirme com `GET /v1/whoami` que a chave pertence ao projeto certo.
+  </Accordion>
+  <Accordion title="Chave live ou test: qual estou usando?">
+    Olhe o prefixo. `rt_live_` é produção e `rt_test_` é teste. Veja [Ambientes](/environments).
+  </Accordion>
+</AccordionGroup>
+
+## Boas práticas de segurança
+
+<Card title="Proteja suas chaves" icon="shield-halved">
+  - Leia a chave de uma variável de ambiente ou de um gerenciador de segredos.
+  - Nunca publique a chave em repositórios, front-ends, apps móveis ou logs.
+  - Use uma chave por integração, com os escopos mínimos.
+  - Rotacione chaves periodicamente e revogue na hora qualquer chave exposta.
+</Card>
+
+O SDK não lê variáveis de ambiente por conta própria. Passe a chave explicitamente:
+
+```ts
+import { Routa } from '@routa-chat/sdk'
+
+const apiKey = process.env['ROUTA_API_KEY']
+if (!apiKey) {
+  throw new Error('ROUTA_API_KEY is not set')
+}
+
+const routa = new Routa({ apiKey })
+```
