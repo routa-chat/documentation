@@ -136,6 +136,12 @@
               "api-reference/endpoint/media/upload",
               "api-reference/endpoint/media/retrieve"
             ]
+          },
+          {
+            "group": "Uso",
+            "pages": [
+              "api-reference/endpoint/usage/retrieve"
+            ]
           }
         ]
       }
