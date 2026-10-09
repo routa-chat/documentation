@@ -1,0 +1,105 @@
+---
+title: "Enviar uma mensagem de texto"
+description: "Envie texto por WhatsApp com POST /v1/messages, use idempotência e metadados e trate as respostas."
+---
+
+`POST /v1/messages` envia uma mensagem por um canal. Este guia cobre o envio de texto. Para templates, veja [Enviar um template](/guides/send-template-message).
+
+<Note>
+  Escopo necessário: `messages:write`.
+</Note>
+
+## Requisição
+
+<CodeGroup>
+```bash cURL
+curl https://api.routa.chat/v1/messages \
+  -H "Authorization: Bearer $ROUTA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 6f0a9d9e-3c1f-4e56-9a64-2b7f6a5c1d10" \
+  -d '{
+    "channel": "chan_01J8...",
+    "to": "+5581999999999",
+    "text": "Olá! Seu pedido foi confirmado.",
+    "metadata": { "order_id": "1234" }
+  }'
+```
+
+```ts Node.js
+import { Routa } from '@routa-chat/sdk'
+
+const routa = new Routa({ apiKey: process.env['ROUTA_API_KEY']! })
+
+const message = await routa.messages.send({
+  channel: 'chan_01J8...',
+  to: '+5581999999999',
+  text: 'Olá! Seu pedido foi confirmado.',
+  metadata: { order_id: '1234' },
+})
+```
+</CodeGroup>
+
+| Campo | Obrigatório | Descrição |
+| --- | --- | --- |
+| `channel` | Sim | Id do canal (`chan_...`). |
+| `to` | Sim | Destinatário em E.164, por exemplo `+5581999999999`. O `+` inicial é opcional: `5581999999999` também funciona. |
+| `text` | Um entre `text` e `template` | Corpo da mensagem. |
+| `template` | Um entre `text` e `template` | Veja [Enviar um template](/guides/send-template-message). |
+| `metadata` | Não | Até 20 pares chave-valor de texto, devolvidos na consulta e nos eventos. |
+
+Informe **exatamente um** entre `text` e `template`. Os dois juntos, ou nenhum, retornam `422 content_rejected`.
+
+## Resposta
+
+A API responde `202 Accepted` com a mensagem no estado `accepted`:
+
+```json
+{
+  "id": "msg_01J8ZK9M3Q7X...",
+  "channel": "chan_01J8...",
+  "direction": "outbound",
+  "from": "+5581988888888",
+  "to": "+5581999999999",
+  "content": { "type": "text", "body": "Olá! Seu pedido foi confirmado." },
+  "status": "accepted",
+  "metadata": { "order_id": "1234" },
+  "accepted_at": "2026-09-04T13:22:40.812Z",
+  "sent_at": null,
+  "delivered_at": null,
+  "read_at": null,
+  "failed_at": null
+}
+```
+
+Guarde o `id`. Ele é a chave para consultar a mensagem e para correlacionar os eventos de entrega. Toda resposta traz também o header `Routa-Request-Id`; cite-o ao falar com o suporte.
+
+## Garanta que não haja duplicidade
+
+Se a rede falhar depois que você enviou a requisição, você não sabe se ela chegou. Reenviar sem cuidado poderia criar duas mensagens. Para evitar isso, envie um `Idempotency-Key` único por mensagem lógica:
+
+- Use um UUID v4 e gere-o **uma vez**, antes da primeira tentativa. Reutilize a mesma chave em todas as retentativas.
+- Uma segunda requisição com a mesma chave e o mesmo corpo devolve a resposta original, com o header `Idempotent-Replay: true`.
+- Reutilizar a chave com um corpo diferente retorna `409 idempotency_key_reuse`.
+
+O SDK gera e reutiliza a chave automaticamente. Detalhes em [Idempotência](/reliability/idempotency).
+
+## Erros comuns
+
+| Status | Código | O que fazer |
+| --- | --- | --- |
+| `401` | `api_key_invalid` | Verifique a chave. Veja [Autenticação](/authentication). |
+| `402` | `message_quota_exceeded` | A franquia do período acabou. Veja [Planos e franquia](/billing/plans-and-quota). |
+| `403` | `insufficient_scope` | A chave não tem `messages:write`. |
+| `404` | `channel_not_found` | O canal não existe neste projeto. |
+| `409` | `idempotency_in_progress` | Há uma requisição idêntica em andamento. Tente de novo após `Retry-After`. |
+| `422` | `channel_inactive` | O canal não está `active`. |
+| `422` | `invalid_recipient` | O número não existe no país informado. |
+| `422` | `content_rejected` | Corpo inválido, por exemplo `text` e `template` juntos. |
+| `429` | `rate_limit_exceeded` | Limite de requisições. Aguarde `Retry-After`. |
+| `429` | `channel_backlog_exceeded` | O canal tem uma fila de envio acima da capacidade. Tente de novo em instantes. |
+
+Veja [Erros](/errors/overview) para o formato completo.
+
+## Próximo passo
+
+A mensagem foi **aceita**, não entregue. [Acompanhe a entrega](/guides/track-delivery) por webhooks.

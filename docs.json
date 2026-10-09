@@ -37,6 +37,12 @@
               "concepts/templates",
               "concepts/media"
             ]
+          },
+          {
+            "group": "Guias",
+            "pages": [
+              "guides/send-text-message"
+            ]
           }
         ]
       }
