@@ -1,0 +1,80 @@
+---
+title: "Acompanhar a entrega"
+description: "Descubra se uma mensagem chegou ao destinatário usando webhooks, consulta direta ou o log de eventos."
+---
+
+Quando `POST /v1/messages` responde `202`, a mensagem está `accepted`: a Routa a gravou, mas ela ainda precisa chegar ao WhatsApp e ao aparelho do cliente. Existem três formas de acompanhar o resto do caminho.
+
+| Forma | Quando usar |
+| --- | --- |
+| **Webhooks** | Recomendado em produção. Você é avisado a cada mudança, sem consultar. |
+| **`GET /v1/messages/{id}`** | Para mostrar o status atual de uma mensagem específica, por exemplo em uma tela de suporte. |
+| **`GET /v1/events`** | Para recuperar eventos perdidos e reconciliar seu estado. |
+
+## 1. Por webhook
+
+Assine os eventos de mensagem. O curinga `message.*` cobre todos eles.
+
+```bash
+curl https://api.routa.chat/v1/webhook_endpoints \
+  -H "Authorization: Bearer $ROUTA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://exemplo.com/webhooks/routa",
+    "subscribed_types": ["message.*"]
+  }'
+```
+
+Cada transição da mensagem gera um evento, cujo `data` é a mensagem no estado atual:
+
+| Evento | A mensagem está |
+| --- | --- |
+| `message.sent` | Com o provedor. |
+| `message.delivered` | No aparelho do destinatário. |
+| `message.read` | Lida. |
+| `message.failed` | Com falha terminal. |
+
+Atualize seu banco usando o `data.id` da mensagem e o `data.status`. Como a entrega pode chegar fora de ordem, **nunca regrida** o status:
+
+```ts
+const RANK = { accepted: 10, sent: 30, delivered: 40, read: 50, failed: 90 } as const
+
+function shouldApply(current: keyof typeof RANK, incoming: keyof typeof RANK): boolean {
+  if (incoming === 'failed') return RANK[current] < RANK.delivered
+  return RANK[incoming] > RANK[current]
+}
+```
+
+Veja a configuração completa em [Webhooks](/webhooks/overview).
+
+## 2. Consultando a mensagem
+
+```bash
+curl https://api.routa.chat/v1/messages/msg_01J8... \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+Os campos `sent_at`, `delivered_at`, `read_at` e `failed_at` mostram quando cada etapa ocorreu, ou `null` se ainda não ocorreu.
+
+<Warning>
+  Evite fazer *polling* em loop para saber se a mensagem foi entregue. Use webhooks. As consultas contam para o seu limite de leituras. Veja [Limites de taxa](/reliability/rate-limits).
+</Warning>
+
+## 3. Reconciliando com o log de eventos
+
+Se o seu servidor ficou indisponível, liste os eventos que você perdeu a partir do último processado:
+
+```bash
+curl "https://api.routa.chat/v1/events?after=evt_01J8...&limit=100" \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+Veja [Reconciliar eventos](/webhooks/reconciliation).
+
+## O que significa `failed`
+
+`failed` é terminal. Ocorre quando o provedor rejeita a mensagem de forma definitiva ou quando as tentativas de envio se esgotam. Falhas transitórias são retentadas automaticamente pela Routa e **não** aparecem como status. O motivo detalhado da falha fica na linha do tempo da mensagem, no painel.
+
+<Info>
+  Se uma mensagem permanece `accepted` por muito tempo, geralmente há uma indisponibilidade do provedor ou o canal está com uma fila acima da capacidade. A mensagem não se perde: ela é enviada assim que o caminho normaliza.
+</Info>

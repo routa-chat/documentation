@@ -43,7 +43,8 @@
             "pages": [
               "guides/send-text-message",
               "guides/send-template-message",
-              "guides/receive-messages"
+              "guides/receive-messages",
+              "guides/track-delivery"
             ]
           }
         ]
