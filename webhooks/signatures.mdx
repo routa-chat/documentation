@@ -1,0 +1,187 @@
+---
+title: "Verificar assinaturas"
+description: "Valide o header Routa-Signature para garantir que cada webhook veio da Routa e não foi alterado."
+---
+
+Qualquer pessoa que conheça a URL do seu endpoint pode enviar uma requisição para ele. A assinatura prova que o evento veio da Routa e que o corpo não foi modificado. **Verifique-a sempre, antes de processar o evento.**
+
+## O header
+
+```http
+Routa-Signature: t=1757000000,v1=9f86d0818...
+```
+
+| Parte | Descrição |
+| --- | --- |
+| `t` | Timestamp Unix, em segundos, do momento em que a Routa assinou a entrega. |
+| `v1` | Assinatura em hexadecimal. Pode haver mais de um `v1=` durante a rotação de segredo (veja abaixo). |
+
+A assinatura é calculada assim:
+
+```text
+v1 = HMAC-SHA256(secret, "{t}.{corpo_bruto}")   // resultado em hex
+```
+
+## Como verificar
+
+<Steps>
+  <Step title="Leia o corpo bruto">
+    Use os bytes **exatamente como chegaram**. Se você fizer parse e serializar o JSON de novo, os bytes mudam e a assinatura não confere.
+  </Step>
+  <Step title="Cheque o timestamp">
+    Rejeite a entrega se `t` estiver a mais de **5 minutos** do horário atual. Isso protege contra reenvio de uma requisição capturada.
+  </Step>
+  <Step title="Calcule o HMAC">
+    Calcule o HMAC-SHA256 de `"{t}.{corpo_bruto}"` com o `secret` do endpoint.
+  </Step>
+  <Step title="Compare em tempo constante">
+    Compare com **cada** valor `v1` do header usando uma comparação de tempo constante. Basta um deles conferir.
+  </Step>
+</Steps>
+
+## Com o SDK
+
+`constructEvent` faz tudo isso, não faz chamadas de rede e retorna o evento tipado.
+
+```ts
+import { Routa, RoutaSignatureVerificationError } from '@routa-chat/sdk'
+
+const routa = new Routa({ apiKey: process.env['ROUTA_API_KEY']! })
+const signingSecret = process.env['ROUTA_WEBHOOK_SECRET']!
+
+// Funciona com qualquer framework que entregue um `Request` da Fetch API.
+export async function handleWebhook(request: Request): Promise<Response> {
+  const rawBody = await request.text()
+
+  try {
+    const event = await routa.webhooks.constructEvent(
+      rawBody,
+      request.headers.get('routa-signature'),
+      signingSecret
+    )
+
+    switch (event.type) {
+      case 'message.delivered':
+        console.log('delivered', event.data)
+        break
+      case 'message.failed':
+        console.log('failed', event.data)
+        break
+    }
+
+    return new Response(null, { status: 200 })
+  } catch (error) {
+    if (error instanceof RoutaSignatureVerificationError) {
+      return new Response('Invalid signature', { status: 400 })
+    }
+    throw error
+  }
+}
+```
+
+Veja mais em [Webhooks no SDK](/sdk/webhooks).
+
+## Sem o SDK
+
+<CodeGroup>
+```ts Node.js
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+const TOLERANCE_SECONDS = 5 * 60
+
+export function verifyRoutaSignature(
+  rawBody: string,
+  header: string | null,
+  secrets: string[]
+): boolean {
+  if (!header) return false
+
+  let timestamp = NaN
+  const signatures: string[] = []
+  for (const part of header.split(',')) {
+    const [key, value] = part.trim().split('=')
+    if (key === 't') timestamp = Number.parseInt(value ?? '', 10)
+    if (key === 'v1' && value) signatures.push(value)
+  }
+  if (Number.isNaN(timestamp) || signatures.length === 0) return false
+
+  const age = Math.abs(Date.now() / 1000 - timestamp)
+  if (age > TOLERANCE_SECONDS) return false
+
+  return secrets.some((secret) => {
+    const expected = createHmac('sha256', secret)
+      .update(`${timestamp}.${rawBody}`)
+      .digest()
+    return signatures.some((signature) => {
+      const received = Buffer.from(signature, 'hex')
+      return received.length === expected.length && timingSafeEqual(received, expected)
+    })
+  })
+}
+```
+
+```python Python
+import hashlib
+import hmac
+import time
+
+TOLERANCE_SECONDS = 5 * 60
+
+
+def verify_routa_signature(raw_body: bytes, header: str | None, secrets: list[str]) -> bool:
+    if not header:
+        return False
+
+    timestamp = None
+    signatures = []
+    for part in header.split(","):
+        key, _, value = part.strip().partition("=")
+        if key == "t" and value.isdigit():
+            timestamp = int(value)
+        elif key == "v1" and value:
+            signatures.append(value)
+    if timestamp is None or not signatures:
+        return False
+
+    if abs(time.time() - timestamp) > TOLERANCE_SECONDS:
+        return False
+
+    signed = f"{timestamp}.".encode() + raw_body
+    for secret in secrets:
+        expected = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+        if any(hmac.compare_digest(expected, signature) for signature in signatures):
+            return True
+    return False
+```
+</CodeGroup>
+
+<Warning>
+  Nunca compare assinaturas com `==`. Uma comparação que sai no primeiro byte diferente permite descobrir a assinatura correta medindo o tempo de resposta.
+</Warning>
+
+## Rotação do segredo
+
+Para trocar o segredo sem perder eventos, chame `POST /v1/webhook_endpoints/{id}/rotate_secret`. A resposta traz o novo `secret`.
+
+- Por **24 horas**, os dois segredos (o novo e o anterior) assinam as entregas, e o header traz dois valores `v1=`.
+- Durante esse período, valide com os dois segredos. O SDK aceita uma lista: `constructEvent(rawBody, header, [novoSegredo, segredoAnterior])`.
+- Depois da janela, o segredo antigo deixa de valer.
+
+```bash
+curl -X POST https://api.routa.chat/v1/webhook_endpoints/whe_01J8.../rotate_secret \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+## Problemas comuns
+
+<AccordionGroup>
+  <Accordion title="A assinatura nunca confere">
+    Quase sempre é o corpo: um middleware já fez o parse do JSON e você está usando a serialização dele. Configure seu framework para expor o corpo bruto da rota do webhook (por exemplo `express.raw({ type: 'application/json' })`).
+  </Accordion>
+  <Accordion title="Funciona em testes, mas falha em produção">
+    Confirme que você usa o segredo do endpoint certo. Cada endpoint tem o seu. Confirme também que o relógio do servidor está sincronizado, já que a tolerância é de 5 minutos.
+  </Accordion>
+  <Accordion title="Falha logo após rotacionar o segredo">
+    Valide com o segredo novo e com o anterior até a janela de 24 horas terminar.
+  </Accordion>
+</AccordionGroup>
