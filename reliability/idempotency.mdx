@@ -1,0 +1,78 @@
+---
+title: "Idempotência"
+description: "Use o header Idempotency-Key para repetir um envio com segurança, sem criar mensagens duplicadas."
+---
+
+Uma falha de rede depois do envio deixa você sem saber se a mensagem foi criada. Reenviar sem cuidado pode mandar **duas mensagens** ao mesmo cliente, que é o pior tipo de bug em mensageria. O header `Idempotency-Key` resolve isso: a Routa garante que a mesma chave produz no máximo uma mensagem.
+
+## Onde se aplica
+
+| Endpoint | Idempotência |
+| --- | --- |
+| `POST /v1/messages` | **Suportada.** Recomendada para todo envio. |
+| Demais endpoints | Não deduplicam por `Idempotency-Key`. |
+
+<Info>
+  Os demais endpoints de escrita são desenhados para serem seguros de repetir (por exemplo, `disable` e `enable`), mas não usam o header. Se você precisa evitar retentativas nesses casos, configure `maxRetries: 0` no SDK.
+</Info>
+
+## Como usar
+
+Gere uma chave única por mensagem **lógica** (por exemplo, um UUID v4), antes da primeira tentativa, e envie a mesma chave em todas as retentativas.
+
+<CodeGroup>
+```bash cURL
+curl https://api.routa.chat/v1/messages \
+  -H "Authorization: Bearer $ROUTA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 6f0a9d9e-3c1f-4e56-9a64-2b7f6a5c1d10" \
+  -d '{ "channel": "chan_01J8...", "to": "+5581999999999", "text": "Olá!" }'
+```
+
+```ts Node.js
+// O SDK gera uma chave automaticamente e a reutiliza em cada retentativa.
+await routa.messages.send({
+  channel: 'chan_01J8...',
+  to: '+5581999999999',
+  text: 'Olá!',
+})
+
+// Para controlar a chave, por exemplo derivando-a de um id do seu domínio:
+await routa.messages.send({
+  channel: 'chan_01J8...',
+  to: '+5581999999999',
+  text: 'Olá!',
+  idempotencyKey: `pedido-1234-confirmacao`,
+})
+```
+</CodeGroup>
+
+<Tip>
+  Derive a chave de um identificador estável do seu domínio (como o id do pedido e o tipo de aviso). Assim, até um reprocessamento do seu próprio job não duplica a mensagem.
+</Tip>
+
+## O que acontece em cada caso
+
+| Situação | Resultado |
+| --- | --- |
+| Primeira vez que a chave é usada | A mensagem é criada. A resposta é armazenada. |
+| Mesma chave, mesmo corpo, já concluída | A **resposta original** é devolvida, com o header `Idempotent-Replay: true`. |
+| Mesma chave, mesmo corpo, ainda em andamento | `409 idempotency_in_progress`, com `Retry-After`. Tente de novo. |
+| Mesma chave, **corpo diferente** | `409 idempotency_key_reuse`. |
+| Chave com mais de 24 horas | Tratada como primeira vez. |
+
+No SDK, quando a chamada devolve o resultado de uma tentativa anterior, `message._replayed` é `true`.
+
+## Escopo e prazo
+
+- A chave vale **dentro do projeto**, para esta operação. Chaves de projetos diferentes nunca colidem.
+- O registro é mantido por **24 horas**. Passado esse prazo, repetir a chave executa a operação de novo. A janela serve para retentativas, não para deduplicação permanente.
+- A comparação do corpo ignora a ordem das chaves e os espaços do JSON.
+
+<Warning>
+  Não reutilize uma mesma `Idempotency-Key` para mensagens diferentes. Uma chave por mensagem lógica, sempre.
+</Warning>
+
+## Limites da garantia
+
+A idempotência protege a **fronteira da API**: uma requisição aceita gera exatamente uma mensagem na Routa. Na etapa seguinte, entre a Routa e o WhatsApp, uma falha com resultado desconhecido (como um timeout) é tratada com uma referência determinística enviada ao provedor para deduplicação e com uma consulta de conciliação antes de qualquer nova tentativa. Mesmo assim, não existe entrega *exatamente uma vez* contra uma API de terceiros: a garantia documentada é **pelo menos uma vez**, e a Routa torna a duplicidade rara, não impossível. Veja [Garantias de entrega](/reliability/delivery-guarantees).

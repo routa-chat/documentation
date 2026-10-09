@@ -56,6 +56,12 @@
               "webhooks/event-types",
               "webhooks/reconciliation"
             ]
+          },
+          {
+            "group": "Confiabilidade",
+            "pages": [
+              "reliability/idempotency"
+            ]
           }
         ]
       }
