@@ -165,7 +165,8 @@
             "group": "Recursos",
             "pages": [
               "sdk/messages",
-              "sdk/webhooks"
+              "sdk/webhooks",
+              "sdk/pagination"
             ]
           }
         ]

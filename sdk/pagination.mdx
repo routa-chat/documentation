@@ -1,0 +1,67 @@
+---
+title: "Paginação"
+description: "Percorra listas com iteradores assíncronos ou controle o cursor manualmente com .page()."
+---
+
+Os métodos de lista do SDK retornam um objeto que é, ao mesmo tempo, um **iterador assíncrono** e tem um método `.page()`. Eles usam a [paginação por cursor](/reliability/pagination) da API.
+
+## Iterar tudo
+
+O iterador busca as páginas seguintes sob demanda:
+
+```ts
+for await (const message of routa.messages.list({ direction: 'inbound', limit: 50 })) {
+  console.log(message.id, message.from, message.content)
+}
+```
+
+`limit` define o tamanho de cada página (1 a 100), não o total. Para parar antes, use `break`:
+
+```ts
+for await (const event of routa.events.list({ type: 'message.failed' })) {
+  await handle(event)
+  if (shouldStop()) break
+}
+```
+
+## Uma página por vez
+
+`.page()` devolve uma única página, com os metadados de paginação:
+
+```ts
+const page = await routa.messages.list({ limit: 20 }).page()
+
+console.log(page.data.length) // itens da página
+console.log(page.hasMore) // existem mais páginas?
+console.log(page.nextCursor) // cursor da próxima página, ou null
+```
+
+Para a página seguinte, passe `cursor`:
+
+```ts
+const next = await routa.messages.list({ limit: 20, cursor: page.nextCursor ?? undefined }).page()
+```
+
+O formato `Page<T>` é:
+
+```ts
+interface Page<T> {
+  readonly data: readonly T[]
+  readonly hasMore: boolean
+  readonly nextCursor: string | null
+}
+```
+
+## Métodos paginados
+
+| Método | Filtros |
+| --- | --- |
+| `routa.messages.list()` | `direction`, `limit`, `cursor` |
+| `routa.events.list()` | `type`, `after`, `limit` |
+| `routa.templates.list()` | `channel`, `limit`, `cursor` |
+| `routa.webhooks.deliveries.list(webhookId)` | `state`, `limit`, `cursor` |
+| `routa.webhooks.list()` | Retorna uma `Page` com todos os endpoints (no máximo 5). |
+
+<Note>
+  Em `routa.events.list()`, o cursor é o id do último evento, passado em `after`. Veja [Reconciliar eventos](/webhooks/reconciliation).
+</Note>
