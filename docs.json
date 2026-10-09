@@ -120,6 +120,14 @@
               "api-reference/endpoint/webhooks/replay-delivery",
               "api-reference/endpoint/webhooks/replay-deliveries"
             ]
+          },
+          {
+            "group": "Templates",
+            "pages": [
+              "api-reference/endpoint/templates/create",
+              "api-reference/endpoint/templates/list",
+              "api-reference/endpoint/templates/retrieve"
+            ]
           }
         ]
       }
