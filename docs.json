@@ -124,5 +124,20 @@
     "socials": {
       "github": "https://github.com/routa-chat"
     }
+  },
+  "api": {
+    "playground": {
+      "display": "interactive"
+    },
+    "examples": {
+      "languages": [
+        "bash",
+        "javascript",
+        "python",
+        "php",
+        "go"
+      ],
+      "defaults": "required"
+    }
   }
 }
