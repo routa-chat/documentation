@@ -1,20 +1,75 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Introdução"
+description: "A Routa é a infraestrutura de mensageria para WhatsApp: uma API REST consistente para enviar e receber mensagens sem lidar com a complexidade do provedor."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+A Routa é uma plataforma para desenvolvedores que torna a comunicação com clientes simples de integrar e confiável de operar. O primeiro produto, o **Routa Messaging**, oferece uma API única para enviar e receber mensagens de WhatsApp, sem expor você a autenticação do provedor, webhooks, templates, limites de taxa, retentativas ou payloads específicos de cada fornecedor.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<Note>
+  Envie sua primeira mensagem de WhatsApp em menos de 30 segundos. Siga o [Início rápido](/quickstart).
+</Note>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+```ts
+import { Routa } from '@routa-chat/sdk'
+
+const routa = new Routa({ apiKey: process.env.ROUTA_API_KEY! })
+
+await routa.messages.send({
+  channel: 'chan_...',
+  to: '+5581999999999',
+  text: 'Olá! Seu pedido foi confirmado.',
+})
+```
+
+## O que a Routa resolve
+
+<CardGroup cols={2}>
+  <Card title="Envio e recebimento" icon="paper-plane">
+    Uma única chamada `POST /v1/messages` envia texto ou templates. Mensagens recebidas chegam como eventos normalizados.
+  </Card>
+  <Card title="Entrega rastreável" icon="route">
+    Cada mensagem percorre um ciclo de vida explícito: `accepted`, `sent`, `delivered`, `read` ou `failed`.
+  </Card>
+  <Card title="Webhooks confiáveis" icon="webhook">
+    Eventos assinados com HMAC, entregues ao menos uma vez, com retentativas, reenvio e consulta de eventos perdidos.
+  </Card>
+  <Card title="Idempotência nativa" icon="shield-check">
+    Envie o header `Idempotency-Key` e uma retentativa de rede nunca gera uma segunda mensagem.
+  </Card>
+</CardGroup>
+
+## Como a Routa funciona
+
+A Routa fica entre a sua aplicação e o provedor de mensageria. O provedor é um detalhe interno: a API pública nunca expõe seus payloads nem seus códigos de erro.
+
+```text
+Sua aplicação  ──►  API da Routa  ──►  Provedor (WhatsApp Cloud API)  ──►  WhatsApp  ──►  Cliente final
+      ▲                  │
+      └── webhooks ◄─────┘   eventos normalizados: message.sent, message.delivered, message.read…
+```
+
+Duas ideias orientam o desenho da API:
+
+- **Aceitar não é entregar.** `POST /v1/messages` responde `202 Accepted` quando a mensagem foi gravada de forma durável. A entrega é assíncrona e você acompanha cada etapa por [webhooks](/webhooks/overview) ou por `GET /v1/events`.
+- **Nada se perde em silêncio.** A Routa absorve limites de taxa, filas, falhas do provedor e retentativas. Falhas permanentes viram eventos observáveis.
+
+## Por onde começar
+
+<CardGroup cols={2}>
+  <Card title="Início rápido" icon="rocket" href="/quickstart">
+    Crie uma chave de API e envie sua primeira mensagem.
+  </Card>
+  <Card title="Autenticação" icon="key" href="/authentication">
+    Chaves de API, escopos e boas práticas de segurança.
+  </Card>
+  <Card title="Referência da API" icon="code" href="/api-reference/introduction">
+    URL base, formatos, paginação, erros e todos os endpoints.
+  </Card>
+  <Card title="SDK para Node.js" icon="node-js" href="/sdk/overview">
+    Cliente oficial em TypeScript, com tipos estritos e retentativas automáticas.
+  </Card>
+</CardGroup>
+
+## O que a Routa não é
+
+A Routa é infraestrutura. Não é um CRM, uma agência, um construtor de chatbots, uma plataforma de marketing nem um simples *wrapper* de provedor. Produtos da MultiON, incluindo o CRM, consomem os mesmos contratos públicos que qualquer outro cliente.
