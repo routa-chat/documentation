@@ -42,7 +42,8 @@
             "group": "Guias",
             "pages": [
               "guides/send-text-message",
-              "guides/send-template-message"
+              "guides/send-template-message",
+              "guides/receive-messages"
             ]
           }
         ]

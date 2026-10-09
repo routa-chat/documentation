@@ -1,0 +1,138 @@
+---
+title: "Receber mensagens"
+description: "Receba mensagens de clientes por webhook (message.received), consulte o histórico e baixe a mídia recebida."
+---
+
+Quando um cliente escreve para o seu número, a Routa normaliza a mensagem, grava-a com `direction: "inbound"` e gera o evento `message.received`. Você não lida com o payload do provedor, nem com a verificação do webhook dele.
+
+<Note>
+  Escopos necessários: `webhooks:write` para registrar o endpoint, `messages:read` para consultar mensagens e `media:read` para baixar mídia.
+</Note>
+
+## Receber por webhook
+
+<Steps>
+  <Step title="Registre um endpoint">
+    Crie um endpoint HTTPS que assine `message.received`.
+
+    <CodeGroup>
+    ```bash cURL
+    curl https://api.routa.chat/v1/webhook_endpoints \
+      -H "Authorization: Bearer $ROUTA_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "url": "https://exemplo.com/webhooks/routa",
+        "subscribed_types": ["message.received"]
+      }'
+    ```
+
+    ```ts Node.js
+    const webhook = await routa.webhooks.create({
+      url: 'https://exemplo.com/webhooks/routa',
+      subscribedTypes: ['message.received'],
+    })
+
+    console.log(webhook.secret) // guarde com segurança, é exibido uma vez
+    ```
+    </CodeGroup>
+
+    O `secret` retornado é usado para [verificar a assinatura](/webhooks/signatures) de cada entrega. Ele é exibido apenas na criação (e ao rotacionar).
+  </Step>
+  <Step title="Verifique e processe o evento">
+    Valide a assinatura sobre o **corpo bruto** e trate `message.received`. O campo `data` é a mensagem recebida.
+
+    ```ts
+    const event = await routa.webhooks.constructEvent(
+      rawBody,
+      request.headers.get('routa-signature'),
+      signingSecret
+    )
+
+    if (event.type === 'message.received') {
+      console.log(event.data) // a mensagem inbound
+    }
+    ```
+  </Step>
+  <Step title="Responda 2xx rapidamente">
+    Retorne `2xx` em até 10 segundos e faça o trabalho pesado depois. Se você demorar ou falhar, a Routa tenta de novo. Veja [Retentativas e reenvio](/webhooks/retries-and-replay).
+  </Step>
+</Steps>
+
+### Exemplo de evento
+
+```json
+{
+  "id": "evt_01J8...",
+  "type": "message.received",
+  "api_version": "v1",
+  "schema_version": 1,
+  "project_id": "proj_01J8...",
+  "sequence": 918300,
+  "occurred_at": "2026-09-04T13:25:02.100Z",
+  "recorded_at": "2026-09-04T13:25:02.311Z",
+  "data": {
+    "id": "msg_01J8...",
+    "channel": "chan_01J8...",
+    "direction": "inbound",
+    "from": "+5581999999999",
+    "to": "+5581988888888",
+    "content": { "type": "text", "body": "Quero alterar meu pedido." },
+    "status": "delivered",
+    "metadata": {},
+    "accepted_at": "2026-09-04T13:25:02.100Z",
+    "sent_at": null,
+    "delivered_at": "2026-09-04T13:25:02.100Z",
+    "read_at": null,
+    "failed_at": null
+  }
+}
+```
+
+## Tipos de conteúdo recebidos
+
+O `content` de uma mensagem recebida pode ser `text`, `image`, `document`, `audio`, `video`, `sticker`, `location` ou `reaction`. Conteúdo que a Routa ainda não modela chega como `{ "type": "unsupported" }`: a mensagem não é descartada. Veja [Tipos de conteúdo](/concepts/messages).
+
+## Baixar a mídia recebida
+
+Para `image`, `document`, `audio`, `video` e `sticker`, o conteúdo traz um `media_id`. A Routa baixa e guarda o arquivo de forma assíncrona. Peça uma URL assinada:
+
+```bash
+curl https://api.routa.chat/v1/media/med_01J8... \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+Se `status` for `pending`, tente de novo em instantes. A URL vale 15 minutos. Veja [Mídia](/concepts/media).
+
+## Marcar como lida
+
+Para enviar a confirmação de leitura ao cliente, chame:
+
+```bash
+curl -X POST https://api.routa.chat/v1/messages/msg_01J8.../read \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+Só mensagens `inbound` podem ser marcadas como lidas. Para uma mensagem `outbound`, a API retorna `422 message_direction_invalid`. Escopo: `messages:write`.
+
+## Consultar o histórico
+
+Liste as mensagens recebidas com paginação por cursor:
+
+<CodeGroup>
+```bash cURL
+curl "https://api.routa.chat/v1/messages?direction=inbound&limit=50" \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+```ts Node.js
+for await (const message of routa.messages.list({ direction: 'inbound', limit: 50 })) {
+  console.log(message.id, message.from, message.content)
+}
+```
+</CodeGroup>
+
+Veja [Paginação](/reliability/pagination).
+
+## Garanta que nenhuma mensagem se perde
+
+Webhooks são entregues **pelo menos uma vez**, então o mesmo evento pode chegar mais de uma vez. Deduplique pelo `id` do evento. Se seu servidor ficou fora do ar, recupere o que perdeu com [`GET /v1/events`](/webhooks/reconciliation).
