@@ -115,7 +115,10 @@
               "api-reference/endpoint/webhooks/update",
               "api-reference/endpoint/webhooks/rotate-secret",
               "api-reference/endpoint/webhooks/disable",
-              "api-reference/endpoint/webhooks/enable"
+              "api-reference/endpoint/webhooks/enable",
+              "api-reference/endpoint/webhooks/list-deliveries",
+              "api-reference/endpoint/webhooks/replay-delivery",
+              "api-reference/endpoint/webhooks/replay-deliveries"
             ]
           }
         ]
