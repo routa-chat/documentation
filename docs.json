@@ -179,7 +179,26 @@
           }
         ]
       }
-    ]
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "Painel",
+          "href": "https://app.routa.chat",
+          "icon": "gauge"
+        },
+        {
+          "anchor": "SDK no GitHub",
+          "href": "https://github.com/routa-chat/routa-nodejs-sdk",
+          "icon": "github"
+        },
+        {
+          "anchor": "Site",
+          "href": "https://routa.chat",
+          "icon": "globe"
+        }
+      ]
+    }
   },
   "navbar": {
     "links": [
