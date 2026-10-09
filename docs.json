@@ -76,7 +76,8 @@
           {
             "group": "Uso e cobrança",
             "pages": [
-              "billing/usage"
+              "billing/usage",
+              "billing/plans-and-quota"
             ]
           }
         ]

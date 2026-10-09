@@ -1,0 +1,85 @@
+---
+title: "Planos e franquia"
+description: "Como a franquia de mensagens do seu plano funciona, o que acontece quando ela acaba e como habilitar o excedente."
+---
+
+Cada organização tem um **plano**, e cada plano inclui uma **franquia** de mensagens por período de cobrança, além de limites de projetos e de canais. Valores e condições dos planos estão no [site da Routa](https://routa.chat). A contratação e a gestão da assinatura são feitas no painel.
+
+<Info>
+  Os endpoints de cobrança (`/v1/billing`) são do painel e usam sessão de usuário. Uma chave de API não compra nem altera planos.
+</Info>
+
+## Como a franquia é contada
+
+- A franquia vale para o **período de cobrança** da sua assinatura, não para o mês-calendário. Ela renova junto com a fatura.
+- Cada mensagem enviada **reserva uma unidade** da franquia no momento do aceite, na mesma transação que grava a mensagem.
+- Se a mensagem falha, a unidade é **devolvida**.
+- Uma repetição idempotente (mesma `Idempotency-Key`) **não consome nada**.
+- Mensagens **recebidas** nunca contam nem são bloqueadas, porque recusar uma mensagem recebida perderia o dado do seu cliente.
+- [Projetos de teste](/environments) não são contados nem bloqueados.
+
+## Quando a franquia acaba
+
+Ao atingir o limite, os **envios param** e `POST /v1/messages` responde `402 Payment Required`:
+
+```json
+{
+  "error": {
+    "type": "billing_error",
+    "code": "message_quota_exceeded",
+    "message": "This billing period's allowance of 2000 messages is used up. It resets at 2026-10-31T00:00:00.000Z; upgrade the plan to keep sending.",
+    "details": {
+      "limit": 2000,
+      "used": 2000,
+      "resets_at": "2026-10-31T00:00:00.000Z"
+    },
+    "request_id": "req_01J8..."
+  }
+}
+```
+
+Use `details.resets_at` para saber quando a franquia renova e `details.limit` e `details.used` para exibir o consumo. As opções para continuar enviando:
+
+<CardGroup cols={3}>
+  <Card title="Aguardar a renovação" icon="clock">
+    A franquia volta ao início do próximo período.
+  </Card>
+  <Card title="Mudar de plano" icon="arrow-up-right">
+    Um plano maior tem mais mensagens. O período de cobrança é mantido, e o que você já usou continua valendo.
+  </Card>
+  <Card title="Habilitar o excedente" icon="plus">
+    Pague por mensagens acima da franquia, com um teto definido por você.
+  </Card>
+</CardGroup>
+
+<Warning>
+  Não programe retentativas automáticas para `402`. Esperar não aumenta a franquia. Trate o erro como um alerta de negócio, enfileire o envio do seu lado e retome depois que a cota for restabelecida.
+</Warning>
+
+## Excedente (opcional)
+
+O excedente deixa você continuar enviando acima da franquia, com um **teto em número de mensagens** definido por você.
+
+- É **opt-in**: nada é cobrado a mais sem você habilitar.
+- Exige pagamento por **cartão**, e nem todo plano oferece excedente.
+- É cobrado **uma vez, depois do fechamento** do período: as mensagens acima da franquia entram como um item na fatura seguinte. O envio nunca chama o provedor de pagamento.
+- O custo máximo por período é limitado pelo teto que você escolheu.
+
+Você ativa, desativa e ajusta o teto no painel.
+
+## Pagamento atrasado
+
+Se o pagamento falha e a assinatura fica `past_due`, você não é bloqueado na hora. Existe um período de tolerância que termina no que vier primeiro:
+
+- **3 dias**; ou
+- **10% da franquia do plano** em mensagens aceitas desde então.
+
+Passado isso, os envios retornam `402` com o código `payment_failed`. Atualize a forma de pagamento no painel para voltar a enviar.
+
+## Limites do plano
+
+Além da franquia, o plano limita o número de projetos e de canais. Ao ultrapassá-los, o painel recusa a criação com `project_limit_exceeded` ou `channel_limit_exceeded`, com `details.limit` indicando o máximo.
+
+## Monitorar o consumo
+
+Consulte quanto você usou com [`GET /v1/usage`](/billing/usage) e acompanhe a franquia no painel. Monte alertas internos para antes de a franquia acabar, em vez de descobrir pelo `402`.
