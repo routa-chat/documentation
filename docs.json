@@ -166,7 +166,8 @@
             "pages": [
               "sdk/messages",
               "sdk/webhooks",
-              "sdk/pagination"
+              "sdk/pagination",
+              "sdk/resources"
             ]
           },
           {

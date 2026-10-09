@@ -1,0 +1,99 @@
+---
+title: "Eventos, templates, mídia e uso"
+description: "Os demais recursos do SDK: routa.events, routa.templates, routa.media, routa.usage e routa.whoami."
+---
+
+## Eventos
+
+`routa.events.list()` lista o log de eventos normalizados. É o caminho de reconciliação depois de uma indisponibilidade do seu servidor. Veja [Reconciliar eventos](/webhooks/reconciliation).
+
+```ts
+for await (const event of routa.events.list({ type: 'message.failed', after: lastEventId })) {
+  console.log(event.type, event.data)
+}
+```
+
+| Parâmetro | Descrição |
+| --- | --- |
+| `type` | Filtra por um tipo de evento. |
+| `after` | Retoma depois deste id de evento. |
+| `limit` | Itens por página, de 1 a 100. |
+
+Cada item é um `RoutaEvent`, o mesmo tipo que `webhooks.constructEvent()` retorna: `id`, `type`, `apiVersion`, `schemaVersion`, `projectId`, `sequence`, `occurredAt`, `recordedAt` e `data`.
+
+## Templates
+
+`routa.templates` submete templates para aprovação e consulta o resultado. Veja [Templates](/concepts/templates).
+
+```ts
+const template = await routa.templates.submit({
+  channel: 'chan_...',
+  name: 'confirmacao_pedido',
+  language: 'pt_BR',
+  category: 'utility',
+  bodyText: 'Olá {{1}}! Seu pedido {{2}} foi confirmado.',
+})
+
+console.log(template.id, template.status)
+```
+
+| Método | Descrição |
+| --- | --- |
+| `submit(params)` | Cria o template e o envia para aprovação. |
+| `retrieve(id)` | Consulta um template e o status de aprovação. |
+| `list({ channel?, limit?, cursor? })` | Lista templates, com paginação automática. |
+
+```ts
+import { toTemplateId } from '@routa-chat/sdk'
+
+const approved = await routa.templates.retrieve(toTemplateId('tmpl_...'))
+if (approved.status === 'approved') {
+  // já pode ser enviado
+} else if (approved.status === 'rejected') {
+  console.log(approved.rejectionReason)
+}
+```
+
+<Info>
+  `templates.submit()` aceita apenas o corpo de texto. Para cabeçalho, rodapé e botões, use `POST /v1/templates` pela [API REST](/api-reference/endpoint/templates/create).
+</Info>
+
+## Mídia
+
+`routa.media.retrieve(id)` retorna o objeto de mídia com uma URL assinada nova, válida por 15 minutos, quando o status é `ready`. Veja [Mídia](/concepts/media).
+
+```ts
+import { toMediaId } from '@routa-chat/sdk'
+
+const media = await routa.media.retrieve(toMediaId('med_...'))
+
+if (media.status === 'ready' && media.url) {
+  const file = await fetch(media.url)
+}
+```
+
+O SDK **não tem** `media.upload()`. Para enviar ou hospedar um arquivo, use [`POST /v1/media`](/api-reference/endpoint/media/upload) diretamente.
+
+## Uso
+
+`routa.usage.retrieve()` devolve o uso medido do projeto em um período de até 92 dias. Veja [Uso](/billing/usage).
+
+```ts
+const usage = await routa.usage.retrieve({ from: '2026-09-01', to: '2026-10-01' })
+
+for (const record of usage.data) {
+  console.log(record.metric, record.channelType, record.quantity, record.unit)
+}
+```
+
+`from` é inclusivo e `to` é exclusivo, em datas UTC `YYYY-MM-DD`.
+
+## Identidade da chave
+
+`routa.whoami()` resolve a chave de API em uso, sem efeitos colaterais:
+
+```ts
+const { organizationId, projectId, apiKeyId, scopes } = await routa.whoami()
+```
+
+`scopes` é uma lista de `ApiKeyScope`: `messages:read`, `messages:write`, `channels:read`, `channels:write`, `events:read`, `webhooks:write`, `usage:read`, `templates:read`, `templates:write`, `media:read` e `media:write`.
