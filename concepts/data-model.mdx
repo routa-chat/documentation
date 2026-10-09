@@ -1,0 +1,80 @@
+---
+title: "Modelo de dados"
+description: "Organizações, projetos, canais e identificadores: como os recursos da Routa se relacionam."
+---
+
+Entender a hierarquia de recursos ajuda a escolher a chave de API certa e a interpretar os identificadores que a API retorna.
+
+## Hierarquia
+
+```text
+Organização
+└── Projeto
+    ├── Chaves de API
+    ├── Canais
+    │   └── Templates
+    ├── Mensagens
+    ├── Mídia
+    ├── Eventos
+    ├── Endpoints de webhook
+    └── Uso
+```
+
+<AccordionGroup>
+  <Accordion title="Organização" icon="building">
+    A raiz de cobrança e de propriedade. Reúne os membros da equipe, o plano e os projetos. Pessoas entram em uma organização com um papel (proprietário, administrador, cobrança, desenvolvedor ou visualizador).
+  </Accordion>
+  <Accordion title="Projeto" icon="folder">
+    A **fronteira de isolamento**. Todo recurso e toda chave de API pertencem a exatamente um projeto, e não existe leitura entre projetos. Um projeto tem um ambiente, `live` ou `test` (veja [Ambientes](/environments)).
+  </Accordion>
+  <Accordion title="Canal" icon="phone">
+    Um endereço de comunicação configurado dentro de um projeto, por exemplo um número de WhatsApp. Não confunda com o *tipo* de canal: hoje o único tipo é `whatsapp`. O canal é identificado por `chan_...` e é o campo `channel` das chamadas de envio.
+  </Accordion>
+</AccordionGroup>
+
+## Canais
+
+Um canal só envia mensagens quando está `active`.
+
+| Status | Significado |
+| --- | --- |
+| `pending` | Conexão em andamento. |
+| `active` | Conectado e apto a enviar. |
+| `degraded` | A Routa não consegue autenticar no provedor (por exemplo, credencial expirada). Reconecte ou rotacione a credencial no painel. |
+| `disabled` | Desativado. |
+
+Enviar por um canal que não está `active` retorna `422` com o código `channel_inactive`. Mudanças de estado geram o evento `channel.status_changed`.
+
+<Info>
+  A conexão e o gerenciamento de canais são feitos no painel. As credenciais do provedor nunca são retornadas pela API.
+</Info>
+
+## Identificadores
+
+Todo recurso tem um identificador com prefixo, seguido de um [ULID](https://github.com/ulid/spec) de 26 caracteres. Os ULIDs são ordenáveis no tempo, seguros para URLs e fáceis de reconhecer em logs.
+
+| Prefixo | Recurso |
+| --- | --- |
+| `org_` | Organização |
+| `proj_` | Projeto |
+| `key_` | Chave de API |
+| `chan_` | Canal |
+| `msg_` | Mensagem |
+| `evt_` | Evento |
+| `tmpl_` | Template |
+| `med_` | Objeto de mídia |
+| `whe_` | Endpoint de webhook |
+| `whd_` | Entrega de webhook |
+| `req_` | Requisição (aparece em logs e erros) |
+
+<Note>
+  Trate os identificadores como strings opacas. Não faça parse nem presuma o comprimento, apenas o prefixo.
+</Note>
+
+## Isolamento entre projetos
+
+A API autentica cada chave em exatamente um projeto, e toda consulta é filtrada por ele. Um recurso de outro projeto responde `404`, nunca `403`, para que a existência dele não vaze.
+
+## Compatibilidade com campos novos
+
+Dentro da versão `v1`, a Routa só faz mudanças aditivas: novos endpoints, novos campos opcionais e novos campos de resposta. **Ignore campos desconhecidos** nas respostas, e ignore tipos de evento que você não reconhece. Veja [Versionamento](/api-reference/introduction#versionamento).
