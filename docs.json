@@ -90,6 +90,15 @@
             "pages": [
               "api-reference/introduction"
             ]
+          },
+          {
+            "group": "Mensagens",
+            "pages": [
+              "api-reference/endpoint/messages/send",
+              "api-reference/endpoint/messages/list",
+              "api-reference/endpoint/messages/retrieve",
+              "api-reference/endpoint/messages/mark-read"
+            ]
           }
         ]
       }
