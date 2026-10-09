@@ -1,0 +1,119 @@
+---
+title: "Tipos e IDs"
+description: "Como usar os tipos do SDK, os IDs branded e as funções de validação e conversão de identificadores."
+---
+
+O SDK é escrito em TypeScript em modo estrito e publica declarações de tipos para ESM e CommonJS. Todas as requisições, respostas, erros e eventos são tipados.
+
+## IDs *branded*
+
+Um id de recurso é uma `string` em runtime, mas o compilador o trata como um tipo distinto. Isso transforma um erro que apareceria como `404` em produção em um erro de compilação.
+
+```ts
+import { toChannelId, toMessageId } from '@routa-chat/sdk'
+
+const messageId = toMessageId('msg_01J8ZK9M3Q7XABCDEFGHJKMNPQ')
+const channelId = toChannelId('chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ')
+
+await routa.messages.retrieve(messageId) // ok
+await routa.messages.retrieve(channelId) // erro de compilação
+await routa.messages.retrieve('msg_01J8ZK9M3Q7XABCDEFGHJKMNPQ') // erro: string comum não é MessageId
+```
+
+Os ids que `send()` e os métodos de lista retornam já são *branded*, então você só precisa converter ids que vieram de fora, como um guardado no seu banco.
+
+### `toXId`: converter sem validar
+
+`toMessageId` apenas faz um *cast*. Use quando o valor já é confiável, como um campo lido de uma resposta da API ou guardado por você.
+
+### `isXId`: validar antes de usar
+
+`isMessageId` verifica o formato (`msg_` seguido de 26 caracteres) e estreita o tipo. Use para entradas não confiáveis, como um parâmetro de URL:
+
+```ts
+import { isMessageId } from '@routa-chat/sdk'
+
+function lookUp(id: string) {
+  if (!isMessageId(id)) {
+    throw new Error(`Not a message id: ${id}`)
+  }
+  return routa.messages.retrieve(id) // id é MessageId aqui
+}
+```
+
+### Tipos de ID disponíveis
+
+| Tipo | Prefixo | Validar | Converter |
+| --- | --- | --- | --- |
+| `MessageId` | `msg_` | `isMessageId` | `toMessageId` |
+| `ChannelId` | `chan_` | `isChannelId` | `toChannelId` |
+| `EventId` | `evt_` | `isEventId` | `toEventId` |
+| `TemplateId` | `tmpl_` | `isTemplateId` | `toTemplateId` |
+| `MediaId` | `med_` | `isMediaId` | `toMediaId` |
+| `WebhookId` | `whe_` | `isWebhookId` | `toWebhookId` |
+| `WebhookDeliveryId` | `whd_` | `isWebhookDeliveryId` | `toWebhookDeliveryId` |
+
+Para outros prefixos, existem os genéricos `Id<Prefix>`, `isPrefixedId` e `toId`.
+
+<Note>
+  O campo `channel` de `messages.send()` e de `templates.submit()` aceita uma `string` comum. Já os ids de recurso em `retrieve` exigem o tipo *branded*.
+</Note>
+
+## Tipos exportados
+
+Os tipos principais podem ser importados do pacote:
+
+```ts
+import type {
+  Message,
+  MessageContent,
+  MessageStatus,
+  RoutaEvent,
+  EventType,
+  Template,
+  TemplateStatus,
+  Webhook,
+  WebhookDelivery,
+  Media,
+  Usage,
+  Whoami,
+  ApiKeyScope,
+  Page,
+} from '@routa-chat/sdk'
+```
+
+### Conteúdo da mensagem
+
+`MessageContent` é uma união discriminada por `type`. Estreite pelo campo:
+
+```ts
+function describe(message: Message): string {
+  const { content } = message
+  switch (content.type) {
+    case 'text':
+      return content.body
+    case 'template':
+      return `template ${content.template_id}`
+    case 'image':
+    case 'video':
+    case 'audio':
+    case 'document':
+    case 'sticker':
+      return `media ${content.media_id}`
+    case 'location':
+      return `${content.latitude}, ${content.longitude}`
+    case 'reaction':
+      return content.emoji
+    case 'unsupported':
+      return '(conteúdo não suportado)'
+  }
+}
+```
+
+### Eventos
+
+`RoutaEvent` é uma união por `type`, com um último membro genérico para tipos que a sua versão do SDK ainda não conhece. Veja [Webhooks no SDK](/sdk/webhooks).
+
+## Convenções de nomes
+
+O SDK expõe os campos da API em *camelCase* (`deliveredAt`, `nextCursor`), exceto dentro de `content` de mensagens e de `data` de eventos, que preservam o formato da API (`media_id`, `template_id`, `body_parameters`).

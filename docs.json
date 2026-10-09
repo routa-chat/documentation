@@ -173,7 +173,8 @@
           {
             "group": "Guias",
             "pages": [
-              "sdk/error-handling"
+              "sdk/error-handling",
+              "sdk/typescript"
             ]
           }
         ]
