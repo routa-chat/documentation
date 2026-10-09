@@ -1,0 +1,86 @@
+---
+title: "Reconciliar eventos"
+description: "Recupere eventos perdidos consultando GET /v1/events depois de uma indisponibilidade do seu servidor."
+---
+
+Como a entrega por webhook é *pelo menos uma vez*, e não *exatamente uma vez*, a Routa oferece um segundo caminho para você conferir o que aconteceu: `GET /v1/events`. Ele transforma uma indisponibilidade de horas em uma recuperação determinística, sem pedir ajuda ao suporte.
+
+<Note>
+  Escopo necessário: `events:read`.
+</Note>
+
+## Quando usar
+
+- Seu servidor ficou fora do ar por mais tempo que a janela de [retentativas](/webhooks/retries-and-replay) (cerca de 20 horas).
+- Você suspeita de lacunas entre os eventos recebidos e o que aconteceu.
+- Você está ligando uma integração nova e quer carregar o histórico.
+- Você quer um *job* periódico de conferência como rede de segurança.
+
+## Como funciona
+
+Guarde o `id` do último evento que você processou. Peça os eventos seguintes com `after`. Repita enquanto `has_more` for `true`.
+
+<CodeGroup>
+```bash cURL
+curl "https://api.routa.chat/v1/events?after=evt_01J8ZK9M3Q7X...&limit=100" \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+```ts Node.js
+let cursor = await loadLastProcessedEventId()
+
+for await (const event of routa.events.list({ after: cursor, limit: 100 })) {
+  await processEvent(event) // idempotente, deduplicando por event.id
+  cursor = event.id
+  await saveLastProcessedEventId(cursor)
+}
+```
+</CodeGroup>
+
+```json Resposta
+{
+  "data": [
+    {
+      "id": "evt_01J8...",
+      "type": "message.failed",
+      "api_version": "v1",
+      "schema_version": 1,
+      "project_id": "proj_01J8...",
+      "sequence": 918274,
+      "occurred_at": "2026-09-04T13:23:00.000Z",
+      "recorded_at": "2026-09-04T13:23:00.150Z",
+      "data": { "id": "msg_01J8...", "status": "failed" }
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null
+}
+```
+
+| Parâmetro | Descrição |
+| --- | --- |
+| `after` | Retoma depois deste id de evento. |
+| `type` | Filtra por um tipo de evento. |
+| `limit` | Itens por página, de 1 a 100. |
+
+Os eventos voltam em ordem crescente de `sequence`. Se o `after` não existir, a API retorna `404 event_not_found`.
+
+## Processe de forma idempotente
+
+Eventos obtidos por esta rota são os mesmos que o webhook entrega, com o mesmo `id`. Se você recebeu um evento por webhook e também o vê na consulta, a deduplicação por `id` evita processá-lo duas vezes.
+
+<Steps>
+  <Step title="Grave o id">
+    Antes de aplicar o efeito, registre o `id` do evento em uma tabela com chave única, na mesma transação do efeito.
+  </Step>
+  <Step title="Ignore repetidos">
+    Se o `id` já existir, pule o evento.
+  </Step>
+  <Step title="Respeite o status monotônico">
+    Para eventos de mensagem, só avance o status. Nunca o rebaixe.
+  </Step>
+</Steps>
+
+## Retenção
+
+Os eventos ficam disponíveis por **90 dias**. Faça a reconciliação dentro desse prazo.

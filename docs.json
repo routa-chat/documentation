@@ -53,7 +53,8 @@
               "webhooks/overview",
               "webhooks/signatures",
               "webhooks/retries-and-replay",
-              "webhooks/event-types"
+              "webhooks/event-types",
+              "webhooks/reconciliation"
             ]
           }
         ]
