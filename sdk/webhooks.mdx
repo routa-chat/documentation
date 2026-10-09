@@ -1,0 +1,118 @@
+---
+title: "Webhooks"
+description: "Crie endpoints de webhook, verifique assinaturas com constructEvent e consulte e reenvie entregas pelo SDK."
+---
+
+`routa.webhooks` gerencia endpoints de webhook e verifica as entregas recebidas. Para os conceitos, veja [Visão geral dos webhooks](/webhooks/overview).
+
+## Criar um endpoint
+
+Registre uma URL HTTPS e guarde o segredo de assinatura. Ele é retornado **uma única vez**, na criação (e de novo ao rotacionar).
+
+```ts
+const webhook = await routa.webhooks.create({
+  url: 'https://exemplo.com/webhooks/routa',
+  subscribedTypes: ['message.*'],
+})
+
+console.log(webhook.id, webhook.secret) // guarde o secret com segurança
+```
+
+## Gerenciar endpoints
+
+| Método | Descrição |
+| --- | --- |
+| `create({ url, subscribedTypes })` | Cria o endpoint e retorna o `secret`. |
+| `list()` | Lista os endpoints do projeto (no máximo 5). Retorna uma `Page`. |
+| `retrieve(id)` | Consulta um endpoint. |
+| `update(id, { subscribedTypes })` | Substitui os tipos assinados. |
+| `rotateSecret(id)` | Gera um novo segredo. O anterior continua válido por 24 horas. |
+| `disable(id)` | Pausa as entregas. |
+| `enable(id)` | Reativa o endpoint e reenvia todas as entregas esgotadas. Retorna `replayedCount`. |
+
+```ts
+const { secret } = await routa.webhooks.rotateSecret(webhook.id)
+const result = await routa.webhooks.enable(webhook.id)
+console.log(result.replayedCount)
+```
+
+## Verificar uma entrega com `constructEvent`
+
+A Routa assina cada entrega no header `Routa-Signature`. `constructEvent` verifica a assinatura e retorna um evento tipado. **Não faz chamadas de rede.**
+
+Passe o **corpo bruto** exatamente como foi recebido. Fazer parse e serializar de novo muda os bytes, e a assinatura deixa de conferir.
+
+```ts
+import { Routa, RoutaSignatureVerificationError } from '@routa-chat/sdk'
+
+const routa = new Routa({ apiKey: process.env['ROUTA_API_KEY']! })
+const signingSecret = process.env['ROUTA_WEBHOOK_SECRET']! // o `secret` de webhooks.create()
+
+// Funciona com qualquer framework que entregue um `Request` da Fetch API.
+export async function handleWebhook(request: Request): Promise<Response> {
+  const rawBody = await request.text()
+
+  try {
+    const event = await routa.webhooks.constructEvent(
+      rawBody,
+      request.headers.get('routa-signature'),
+      signingSecret
+    )
+
+    switch (event.type) {
+      case 'message.delivered':
+        console.log('delivered', event.data)
+        break
+      case 'message.failed':
+        console.log('failed', event.data)
+        break
+    }
+
+    return new Response(null, { status: 200 })
+  } catch (error) {
+    if (error instanceof RoutaSignatureVerificationError) {
+      return new Response('Invalid signature', { status: 400 })
+    }
+    throw error
+  }
+}
+```
+
+`constructEvent` aceita o corpo como `string` ou `Uint8Array` e rejeita assinaturas ausentes, malformadas, inválidas ou com timestamp fora da tolerância de 5 minutos, lançando `RoutaSignatureVerificationError`.
+
+### Rotação de segredo
+
+Durante a rotação, passe os dois segredos para aceitar qualquer um deles:
+
+```ts
+const event = await routa.webhooks.constructEvent(rawBody, header, [newSecret, oldSecret])
+```
+
+### Tipos de evento
+
+O SDK conhece `message.accepted`, `message.sent`, `message.delivered`, `message.read`, `message.failed`, `message.received`, `channel.status_changed` e `template.*`. Um tipo introduzido depois da sua versão instalada ainda é interpretado: chega como um evento genérico, com `type` do tipo `string` e `data` como `unknown`, e é seguro ignorá-lo.
+
+<Info>
+  Como o último membro da união `RoutaEvent` tem `type: string`, um `switch (event.type)` sozinho não estreita os outros campos. Verifique `'id' in event` antes para obter o envelope completo.
+</Info>
+
+## Entregas e reenvio
+
+`routa.webhooks.deliveries` consulta as entregas de um endpoint e reenvia as esgotadas. Veja [Retentativas e reenvio](/webhooks/retries-and-replay).
+
+```ts
+// Entregas que esgotaram as tentativas
+for await (const delivery of routa.webhooks.deliveries.list(webhook.id, { state: 'exhausted' })) {
+  console.log(delivery.id, delivery.eventType, delivery.lastResponseStatus)
+}
+
+// Reenviar uma entrega
+await routa.webhooks.deliveries.replay(webhook.id, deliveryId)
+
+// Reenviar todas as esgotadas do endpoint
+const { replayedCount } = await routa.webhooks.deliveries.replay(webhook.id)
+```
+
+## Eventos perdidos
+
+Se o seu endpoint ficou fora do ar, `routa.events.list()` devolve o que você não recebeu. Veja [Reconciliar eventos](/webhooks/reconciliation).
