@@ -1,0 +1,88 @@
+---
+title: "Limites de taxa"
+description: "Limites de requisições por projeto, os headers RateLimit e como reagir a um 429."
+---
+
+A Routa limita as requisições por **projeto** para proteger a plataforma. Os limites usam o algoritmo *token bucket*: você tem um balde com capacidade de rajada que se reabastece a uma taxa constante.
+
+## Limites padrão
+
+| Classe | Endpoints | Taxa sustentada | Rajada |
+| --- | --- | --- | --- |
+| Envios | `POST /v1/messages` | 50 req/s | 100 |
+| Escritas | Demais `POST`, `PATCH` e `PUT` da API de dados | 20 req/s | 40 |
+| Leituras | Todos os `GET` | 100 req/s | 200 |
+
+Os valores são por projeto. Se a sua operação precisa de mais, fale com a Routa: elevar o limite de um projeto é uma configuração, não um deploy.
+
+<Info>
+  O envio de uma mensagem só consome o limite de **envios**. Ele não disputa tokens com as suas leituras.
+</Info>
+
+## Headers de resposta
+
+Os headers `RateLimit-*` vêm em **toda** resposta, não só nas rejeitadas, então você pode ajustar o ritmo antes de levar um `429`.
+
+| Header | Descrição |
+| --- | --- |
+| `RateLimit-Limit` | Taxa sustentada da classe, em requisições por segundo. |
+| `RateLimit-Remaining` | Tokens restantes no balde. |
+| `RateLimit-Reset` | Segundos até o balde se reabastecer. |
+| `Retry-After` | Somente em `429`: segundos a esperar antes de tentar de novo. |
+
+## Resposta 429
+
+```http
+HTTP/1.1 429 Too Many Requests
+RateLimit-Limit: 50
+RateLimit-Remaining: 0
+RateLimit-Reset: 1
+Retry-After: 1
+Content-Type: application/json
+```
+
+```json
+{
+  "error": {
+    "type": "rate_limit_error",
+    "code": "rate_limit_exceeded",
+    "message": "Rate limit exceeded for sends. Retry after 1 second(s).",
+    "request_id": "req_01J8..."
+  }
+}
+```
+
+### Como reagir
+
+<Steps>
+  <Step title="Respeite o Retry-After">
+    Espere pelo menos o número de segundos indicado antes de tentar de novo.
+  </Step>
+  <Step title="Use espera exponencial com jitter">
+    Se vários processos são limitados ao mesmo tempo, adicione variação aleatória para não repetirem a requisição juntos.
+  </Step>
+  <Step title="Reduza o ritmo na origem">
+    Use `RateLimit-Remaining` para espaçar o envio de lotes. Para disparos grandes, enfileire do seu lado.
+  </Step>
+</Steps>
+
+O SDK Node.js já repete `429` automaticamente, com espera exponencial, jitter e respeito ao `Retry-After`. Veja [Configuração](/sdk/configuration).
+
+## Limites do provedor: a Routa absorve
+
+O WhatsApp impõe seus próprios limites de envio por número. Você **não** precisa gerenciá-los: a Routa os absorve na fila. Uma mensagem já aceita nunca vira erro `429` por limite do provedor. Ela espera na fila e é enviada. Você percebe latência, não falha.
+
+## Backlog do canal
+
+Se a fila de um canal passa muito da sua capacidade de escoamento, a Routa recusa novos envios para **aquele canal** com `429` e o código `channel_backlog_exceeded`. É um sinal honesto: aceitar mais trabalho seria prometer um prazo que não dá para cumprir. O limite é alto e por canal. Tente de novo em instantes.
+
+## Tamanho do corpo
+
+Todo corpo de requisição tem um limite, verificado antes de ser lido.
+
+| Rota | Limite |
+| --- | --- |
+| Rotas JSON em geral | 1 MiB |
+| Upload de mídia (`POST /v1/media`, `POST /v1/templates/media`) | 100 MiB (o limite por tipo de arquivo é menor, veja [Mídia](/concepts/media)) |
+
+Acima do limite, a API retorna `413 payload_too_large`.
