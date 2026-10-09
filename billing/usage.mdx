@@ -1,0 +1,87 @@
+---
+title: "Uso"
+description: "Consulte o uso medido do seu projeto por métrica, canal e período com GET /v1/usage."
+---
+
+A Routa mede cada fato faturável e informativo do seu projeto em um registro imutável. `GET /v1/usage` devolve esse uso **agregado** para um período, o que permite montar relatórios, alertas de consumo e conferências de custo.
+
+<Note>
+  Escopo necessário: `usage:read`.
+</Note>
+
+## Consultar o uso
+
+Informe o período com `from` (inclusivo) e `to` (exclusivo), em datas UTC no formato `YYYY-MM-DD`.
+
+<CodeGroup>
+```bash cURL
+curl "https://api.routa.chat/v1/usage?from=2026-09-01&to=2026-10-01" \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+```ts Node.js
+const usage = await routa.usage.retrieve({
+  from: '2026-09-01',
+  to: '2026-10-01',
+})
+
+for (const row of usage.data) {
+  console.log(row.metric, row.quantity, row.unit)
+}
+```
+</CodeGroup>
+
+```json Resposta
+{
+  "from_date": "2026-09-01",
+  "to_date": "2026-10-01",
+  "data": [
+    {
+      "metric": "message.sent",
+      "channel_type": "whatsapp",
+      "provider": "whatsapp_cloud",
+      "quantity": 1840,
+      "unit": "message"
+    },
+    {
+      "metric": "message.received",
+      "channel_type": "whatsapp",
+      "provider": "whatsapp_cloud",
+      "quantity": 412,
+      "unit": "message"
+    }
+  ]
+}
+```
+
+A resposta tem **uma linha por combinação** de `metric`, `channel_type` e `provider` no período inteiro. O dia corrente ainda aberto é lido ao vivo e entra na soma. Não há paginação: o tamanho da resposta é limitado pelo número de métricas e canais, não pelo volume enviado.
+
+<Warning>
+  O período pode ter no máximo **92 dias**. Um intervalo maior, invertido ou mal formatado retorna `422 usage_range_invalid`.
+</Warning>
+
+## Métricas
+
+| Métrica | Unidade | Medida quando |
+| --- | --- | --- |
+| `message.sent` | `message` | O provedor aceita uma mensagem enviada. |
+| `message.delivered` | `message` | A entrega é confirmada. |
+| `message.received` | `message` | Uma mensagem recebida é normalizada. |
+| `message.failed` | `message` | Uma mensagem falha de forma terminal. |
+| `conversation.opened` | `conversation` | O provedor indica uma nova conversa faturável. |
+| `media.stored` | `byte-day` | Armazenamento de mídia (varredura diária). |
+| `media.transferred` | `byte` | Envio e download de mídia. |
+| `webhook.delivered` | `delivery` | Uma entrega de webhook tem sucesso. |
+| `api.request` | `request` | Requisições à API. |
+
+A lista de métricas é fechada: novas métricas podem ser adicionadas, mas as existentes nunca são renomeadas.
+
+## Como o uso é registrado
+
+- O uso faturável é gravado **na mesma transação** da mudança de estado que o causou. Por isso ele não "deriva" do que realmente aconteceu.
+- Reprocessar um evento não conta duas vezes: cada fato é registrado uma única vez por métrica.
+- O painel mostra o mesmo uso, por projeto.
+
+<Info>
+  O uso é diferente da **franquia do plano**: o primeiro mede o que aconteceu; a segunda decide se você pode enviar agora. Veja [Planos e franquia](/billing/plans-and-quota).
+</Info>

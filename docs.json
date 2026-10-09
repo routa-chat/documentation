@@ -72,6 +72,12 @@
               "errors/overview",
               "errors/error-codes"
             ]
+          },
+          {
+            "group": "Uso e cobrança",
+            "pages": [
+              "billing/usage"
+            ]
           }
         ]
       }
