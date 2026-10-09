@@ -1,0 +1,51 @@
+---
+title: "Ambientes: produção e teste"
+description: "Entenda a diferença entre projetos live e test e como a chave de API define o ambiente das suas requisições."
+---
+
+A Routa tem um único endpoint para todos os ambientes:
+
+```text
+https://api.routa.chat
+```
+
+O ambiente **não** muda a URL. Quem define o ambiente é o **projeto** ao qual a chave de API pertence, e o prefixo da chave diz qual é.
+
+| Chave | Projeto | Uso |
+| --- | --- | --- |
+| `rt_live_...` | `live` | Tráfego real de produção. |
+| `rt_test_...` | `test` | Desenvolvimento e testes automatizados. |
+
+Para alternar de ambiente, troque a chave. Não altere a URL.
+
+## O que muda em um projeto de teste
+
+Um projeto `test` executa **exatamente os mesmos caminhos de código** de um projeto `live`: mesma validação, mesmo ciclo de vida de mensagem, mesmos eventos, mesmos erros. As diferenças ficam em:
+
+- **O que ele pode conectar.** Um projeto de teste só conecta credenciais de sandbox do provedor.
+- **Cobrança.** Mensagens de projetos de teste não são contadas nem bloqueadas pela franquia do plano.
+- **Webhooks locais.** Endpoints `http://` em `localhost` são aceitos apenas em projetos de teste. Em produção, a URL precisa ser HTTPS e não pode apontar para endereços privados ou de loopback.
+
+<Warning>
+  Nunca use uma chave `rt_live_` em testes automatizados. Uma mensagem enviada por um projeto live chega ao destinatário real e conta na sua franquia.
+</Warning>
+
+## Como saber em qual ambiente você está
+
+O prefixo da chave indica o ambiente. Para confirmar o projeto, chame `GET /v1/whoami`:
+
+```bash
+curl https://api.routa.chat/v1/whoami \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+## Apontando para outro host
+
+Para apontar o SDK para outra instância, como uma instalação local ou de homologação, defina `baseURL`:
+
+```ts
+const routa = new Routa({
+  apiKey: process.env['ROUTA_API_KEY']!,
+  baseURL: 'http://localhost:3000',
+})
+```
