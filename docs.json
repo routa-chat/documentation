@@ -150,6 +150,17 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "SDK Node.js",
+        "groups": [
+          {
+            "group": "Comece aqui",
+            "pages": [
+              "sdk/overview"
+            ]
+          }
+        ]
       }
     ]
   },

@@ -1,0 +1,120 @@
+---
+title: "SDK para Node.js"
+description: "O cliente oficial da Routa para TypeScript e JavaScript: instalação, primeiro envio, requisitos e o que ainda não é suportado."
+---
+
+O `@routa-chat/sdk` é o SDK oficial da Routa para Node.js. Ele oferece um cliente tipado para enviar mensagens de WhatsApp e receber eventos de entrega, com retentativas, idempotência e verificação de webhooks incluídas.
+
+<CardGroup cols={3}>
+  <Card title="Tipos estritos" icon="shield-check">
+    Tipos para toda requisição e resposta, com IDs *branded* que evitam trocar um canal por uma mensagem.
+  </Card>
+  <Card title="Retentativas seguras" icon="rotate">
+    Espera exponencial com jitter, respeito a `Retry-After` e `Idempotency-Key` automática.
+  </Card>
+  <Card title="Sem dependências" icon="feather">
+    Usa `fetch` e Web Crypto da plataforma. ESM e CommonJS, com declarações de tipos.
+  </Card>
+</CardGroup>
+
+## Requisitos
+
+Node.js **22 ou superior** (`engines.node` é `>=22`). O pacote publica as versões ESM e CommonJS, então funciona com `import` e com `require`.
+
+## Instalação
+
+<CodeGroup>
+```bash npm
+npm install @routa-chat/sdk
+```
+
+```bash pnpm
+pnpm add @routa-chat/sdk
+```
+
+```bash yarn
+yarn add @routa-chat/sdk
+```
+</CodeGroup>
+
+## Primeiro envio
+
+```ts
+import { Routa } from '@routa-chat/sdk'
+
+const routa = new Routa({ apiKey: process.env['ROUTA_API_KEY']! })
+
+const message = await routa.messages.send({
+  channel: 'chan_...', // um canal conectado no painel da Routa
+  to: '+5581999999999', // destinatário em E.164; o + inicial é opcional
+  text: 'Olá! Seu pedido foi confirmado.',
+})
+
+console.log(message.id, message.status) // "msg_...", "accepted"
+```
+
+`status: 'accepted'` significa que a Routa recebeu a mensagem, **não** que ela chegou ao destinatário. A entrega é assíncrona: a mensagem avança por `sent`, `delivered` e `read` (ou `failed`), e você acompanha cada etapa por [webhooks](/sdk/webhooks) ou por `routa.events.list()`.
+
+Para enviar um template aprovado no lugar de texto livre, passe `template` em vez de `text`:
+
+```ts
+await routa.messages.send({
+  channel: 'chan_...',
+  to: '+5581999999999',
+  template: { id: 'tmpl_...', bodyParameters: ['Ana', '#1234'] },
+})
+```
+
+`text` e `template` são mutuamente exclusivos: passar os dois é um erro de compilação.
+
+## Autenticação
+
+O cliente envia a chave como `Authorization: Bearer <chave>`. Crie chaves no painel, em **Configurações → Chaves de API**. O SDK **não lê variáveis de ambiente por conta própria**: passe o valor explicitamente.
+
+```ts
+import { Routa } from '@routa-chat/sdk'
+
+const apiKey = process.env['ROUTA_API_KEY']
+if (!apiKey) {
+  throw new Error('ROUTA_API_KEY is not set')
+}
+
+const routa = new Routa({ apiKey })
+```
+
+`new Routa('rt_live_...')` é um atalho para `new Routa({ apiKey: 'rt_live_...' })`. Uma chave vazia lança um erro imediatamente, na construção, e não na primeira requisição.
+
+Para verificar uma chave sem efeitos colaterais, chame `routa.whoami()`:
+
+```ts
+const { organizationId, projectId, scopes } = await routa.whoami()
+```
+
+Veja mais em [Chaves de API](/authentication).
+
+## Recursos do cliente
+
+| Namespace | Operações |
+| --- | --- |
+| `routa.messages` | `send`, `retrieve`, `list`, `markRead`. Veja [Mensagens](/sdk/messages). |
+| `routa.webhooks` | `create`, `list`, `retrieve`, `update`, `enable`, `disable`, `rotateSecret`, `constructEvent` e `deliveries`. Veja [Webhooks](/sdk/webhooks). |
+| `routa.events` | `list`. |
+| `routa.templates` | `submit`, `retrieve`, `list`. |
+| `routa.media` | `retrieve`. |
+| `routa.usage` | `retrieve`. |
+| `routa.whoami()` | Identidade da chave. |
+
+As demais operações estão em [Eventos, templates, mídia e uso](/sdk/resources).
+
+## Ainda não suportado
+
+Conheça estas lacunas antes de construir sobre o SDK. Todas estão disponíveis pela [API REST](/api-reference/introduction):
+
+- **Envio de mídia (upload).** `routa.media.retrieve(id)` funciona, mas não existe `media.upload()`.
+- **Envio de mídia, localização ou reações.** `messages.send()` aceita apenas `text` e `template`. Mensagens recebidas e históricas desses tipos podem ser lidas, mas não enviadas.
+- **Canais.** Não existe o namespace `routa.channels`. Conecte e gerencie canais no painel e passe o id do canal para `send()`.
+- **Componentes de template.** `templates.submit()` aceita apenas o corpo de texto. Cabeçalho, rodapé e botões dependem da API REST.
+
+## Contribuir
+
+Issues e pull requests são bem-vindos no [GitHub](https://github.com/routa-chat/routa-nodejs-sdk/issues). O SDK é distribuído sob a licença MIT.
