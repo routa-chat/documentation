@@ -1,0 +1,119 @@
+---
+title: "Retentativas e reenvio"
+description: "Como a Routa retenta entregas que falham, quando um endpoint é desativado e como reenviar entregas esgotadas."
+---
+
+Um servidor fora do ar por seis horas não deve fazer você perder eventos nem abrir um chamado. A Routa retenta, guarda o que não foi entregue e deixa você reenviar.
+
+## Política de retentativas
+
+Uma entrega tem até **8 tentativas** ao longo de cerca de 20 horas, com espera crescente e variação aleatória de ±20%.
+
+| Tentativa | Espera após a anterior |
+| --- | --- |
+| 1 | Imediata |
+| 2 | 10 segundos |
+| 3 | 30 segundos |
+| 4 | 2 minutos |
+| 5 | 10 minutos |
+| 6 | 1 hora |
+| 7 | 6 horas |
+| 8 | 12 horas |
+
+### O que conta como sucesso
+
+- Uma resposta `2xx` em até **10 segundos**.
+- Qualquer outra coisa é falha: outro status, timeout ou erro de conexão. A Routa não segue redirecionamentos.
+- O corpo da resposta é ignorado. A Routa lê no máximo os primeiros 4 KB.
+
+### `410 Gone`
+
+Uma resposta `410` é tratada como remoção permanente: a entrega é abandonada na hora, sem esgotar as tentativas. Use `410` apenas se você realmente não quer mais receber aquele evento. Outros `4xx` (como um `401` temporário da sua camada de autenticação) são retentados normalmente.
+
+## Estados de uma entrega
+
+Cada combinação de evento e endpoint é uma **entrega** (`whd_...`) com seu próprio estado.
+
+| Estado | Significado |
+| --- | --- |
+| `pending` | Criada, ainda não tentada. |
+| `in_flight` | Em tentativa agora. |
+| `retrying` | Falhou e aguarda a próxima tentativa. |
+| `succeeded` | Entregue com `2xx`. |
+| `exhausted` | Esgotou as tentativas, ou recebeu `410`. É o estado de *dead-letter*. |
+
+Liste as entregas de um endpoint, filtrando por estado:
+
+```bash
+curl "https://api.routa.chat/v1/webhook_endpoints/whe_01J8.../deliveries?state=exhausted" \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+Cada item mostra `attempt_count`, `next_attempt_at`, `last_response_status` e `last_error_code`, o que ajuda a entender por que uma entrega falha. As entregas ficam consultáveis por **30 dias**.
+
+## Reenviar entregas esgotadas
+
+Depois de corrigir o seu endpoint, reenvie o que ficou para trás.
+
+<Tabs>
+  <Tab title="Uma entrega">
+    ```bash
+    curl -X POST \
+      https://api.routa.chat/v1/webhook_endpoints/whe_01J8.../deliveries/whd_01J8.../replay \
+      -H "Authorization: Bearer $ROUTA_API_KEY"
+    ```
+
+    Só entregas `exhausted` podem ser reenviadas. Outro estado retorna `409 webhook_delivery_not_replayable`.
+  </Tab>
+  <Tab title="Todas de um endpoint">
+    ```bash
+    curl -X POST \
+      https://api.routa.chat/v1/webhook_endpoints/whe_01J8.../deliveries/replay \
+      -H "Authorization: Bearer $ROUTA_API_KEY"
+    ```
+
+    A resposta informa quantas entregas foram reenviadas:
+
+    ```json
+    { "replayed_count": 12 }
+    ```
+  </Tab>
+</Tabs>
+
+## Desativação automática
+
+Para proteger o sistema de gastar capacidade com um endpoint morto, a Routa **desativa** um endpoint (`status: "disabled_by_system"`) quando ocorre uma das situações:
+
+- 100 falhas consecutivas; ou
+- 24 horas sem nenhum sucesso, com pelo menos 20 tentativas de entrega.
+
+As entregas pendentes param e o novo status fica visível no endpoint e no painel. **Os eventos continuam sendo gravados no log**, então nada se perde.
+
+Para reativar, chame `POST /v1/webhook_endpoints/{id}/enable`. A reativação **reenvia em lote** todas as entregas esgotadas do endpoint e responde com `replayed_count`, a quantidade reenviada.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.routa.chat/v1/webhook_endpoints/whe_01J8.../enable \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+```ts Node.js
+await routa.webhooks.enable(webhookId)
+```
+</CodeGroup>
+
+Você também pode pausar um endpoint voluntariamente com `POST /v1/webhook_endpoints/{id}/disable` (`status: "disabled_by_user"`), por exemplo durante uma manutenção.
+
+## Status do endpoint
+
+| Status | Significado |
+| --- | --- |
+| `enabled` | Recebendo entregas. |
+| `disabled_by_user` | Desativado por você. |
+| `disabled_by_system` | Desativado automaticamente após falhas contínuas. |
+
+O objeto do endpoint traz `consecutive_failures`, `last_success_at` e `last_failure_at` para você monitorar a saúde dele.
+
+## Isolamento
+
+As entregas de webhook rodam em uma fila e em workers próprios. Um endpoint lento seu nunca atrasa o envio de mensagens, nem o de outros clientes. A concorrência por endpoint é limitada, e endpoints consistentemente lentos são desacelerados automaticamente.

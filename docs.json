@@ -51,7 +51,8 @@
             "group": "Webhooks",
             "pages": [
               "webhooks/overview",
-              "webhooks/signatures"
+              "webhooks/signatures",
+              "webhooks/retries-and-replay"
             ]
           }
         ]
