@@ -62,7 +62,8 @@
             "pages": [
               "reliability/idempotency",
               "reliability/rate-limits",
-              "reliability/pagination"
+              "reliability/pagination",
+              "reliability/delivery-guarantees"
             ]
           }
         ]

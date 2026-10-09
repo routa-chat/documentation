@@ -1,0 +1,98 @@
+---
+title: "Garantias de entrega"
+description: "O que a Routa garante e o que não garante sobre o envio e a entrega de mensagens, e como projetar sua integração com isso."
+---
+
+Mensageria sobre uma API de terceiros tem limites físicos. Esta página diz com clareza o que a Routa **promete**, o que ela **não** promete e como você deve projetar sua integração.
+
+## O que a Routa garante
+
+<CardGroup cols={2}>
+  <Card title="Nenhuma perda silenciosa" icon="shield-check">
+    Uma mensagem aceita (`202`) é gravada de forma durável antes da resposta. Ela nunca desaparece sem deixar rastro: chega ao destino ou vira `failed`.
+  </Card>
+  <Card title="Status que não regride" icon="arrow-up-right">
+    O status só avança. Uma mensagem não volta de `read` para `sent` por causa de um aviso atrasado.
+  </Card>
+  <Card title="Falhas permanentes são visíveis" icon="eye">
+    Toda falha terminal gera `message.failed`, e as transitórias são retentadas automaticamente.
+  </Card>
+  <Card title="Eventos recuperáveis" icon="clock-rotate-left">
+    Eventos ficam no log por 90 dias e podem ser consultados e reenviados.
+  </Card>
+</CardGroup>
+
+## O que a Routa não garante
+
+- **Entrega imediata.** Aceitar não é entregar. A latência depende do provedor e da fila do canal.
+- **Ordem global.** Mensagens e eventos podem chegar fora de ordem. Use `sequence`, `occurred_at` e o status monotônico para reconciliar.
+- **Exatamente uma vez.** Não existe entrega exatamente uma vez contra uma API HTTP de terceiros. A garantia é **pelo menos uma vez**.
+
+## Envio: aceito, depois assíncrono
+
+```text
+POST /v1/messages ─► 202 accepted ─► fila ─► provedor ─► sent ─► delivered ─► read
+                       (durável)                      └──────► failed
+```
+
+1. A API valida e grava a mensagem e o evento `message.accepted` na mesma transação. Só então responde `202`.
+2. Um worker envia ao provedor, respeitando os limites de taxa do canal.
+3. As confirmações do provedor (`sent`, `delivered`, `read`, `failed`) atualizam a mensagem e geram eventos.
+
+### Se algo falha no meio
+
+| Situação | Comportamento |
+| --- | --- |
+| Banco de dados indisponível | `503`. Nada foi gravado e nada foi enviado, então é seguro repetir. |
+| Fila indisponível | A mensagem permanece `accepted` e um processo de varredura a reenvia à fila em instantes. Você já tem o `202`: é latência, não perda. |
+| Falha transitória do provedor | Retentativas automáticas com espera crescente (cerca de 21 minutos no total, 7 tentativas). A mensagem permanece `accepted`. |
+| Falha permanente do provedor | `failed` imediato, com `message.failed`. |
+| Tentativas esgotadas | `failed`. |
+| Provedor fora do ar | A mensagem espera na fila e sai quando ele voltar. |
+
+### Resultado desconhecido
+
+O caso mais difícil é um timeout contra o provedor: a mensagem pode ou não ter sido enviada. A Routa:
+
+1. Envia uma referência determinística junto com a mensagem, permitindo deduplicação no provedor.
+2. Antes de tentar de novo, consulta o provedor para saber se ele já registrou a mensagem, quando ele oferece essa consulta.
+3. Se a dúvida persiste, tenta de novo: a garantia é **pelo menos uma vez**. A duplicidade é rara e honesta, nunca escondida.
+
+## Recebimento
+
+Mensagens recebidas são persistidas antes de serem processadas, e a Routa deduplica reentregas do provedor. Conteúdo que ela não entende vira `content.type = "unsupported"`: a mensagem não é descartada. Se uma mídia recebida falha em definitivo, a mensagem continua existindo com a mídia `unavailable`.
+
+## Eventos e webhooks
+
+- Cada evento é entregue **pelo menos uma vez** a cada endpoint assinante, com o mesmo `id` em todas as tentativas.
+- Uma entrega é retentada por cerca de 20 horas. Depois disso ela fica `exhausted` e pode ser reenviada. Veja [Retentativas e reenvio](/webhooks/retries-and-replay).
+- `GET /v1/events` permite reconciliar. Veja [Reconciliar eventos](/webhooks/reconciliation).
+
+## Como projetar sua integração
+
+<Steps>
+  <Step title="Envie com idempotência">
+    Use `Idempotency-Key` em todo envio. Veja [Idempotência](/reliability/idempotency).
+  </Step>
+  <Step title="Não trate 202 como entrega">
+    Confirme a entrega por `message.delivered`.
+  </Step>
+  <Step title="Processe eventos de forma idempotente">
+    Deduplique por `event.id` e nunca regrida o status.
+  </Step>
+  <Step title="Tenha um job de conferência">
+    Rode periodicamente [`GET /v1/events`](/webhooks/reconciliation) como rede de segurança.
+  </Step>
+</Steps>
+
+## Retenção de dados
+
+Períodos de retenção publicados como parte do contrato da API.
+
+| Dado | Retenção |
+| --- | --- |
+| Conteúdo de mensagens | 12 meses |
+| Mídia | 90 dias |
+| Eventos | 90 dias |
+| Registros de entrega de webhook | 30 dias |
+| Chaves de idempotência | 24 horas |
