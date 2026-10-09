@@ -1,0 +1,96 @@
+---
+title: "Mídia"
+description: "Como a Routa armazena imagens, áudios, vídeos e documentos, quais tipos são aceitos e como obter uma URL temporária."
+---
+
+Mídia recebida em mensagens e arquivos enviados à API ficam sob custódia da Routa, em armazenamento privado. A API nunca expõe uma URL pública permanente: ela entrega uma **URL assinada de curta duração**.
+
+## O objeto mídia
+
+```json
+{
+  "id": "med_01J8...",
+  "content_type": "image/jpeg",
+  "status": "ready",
+  "url": "https://..."
+}
+```
+
+| Campo | Descrição |
+| --- | --- |
+| `id` | Identificador da mídia (`med_...`). É o `media_id` do conteúdo de uma mensagem. |
+| `content_type` | Tipo MIME do arquivo. |
+| `status` | `pending`, `ready` ou `unavailable`. |
+| `url` | URL assinada, presente apenas quando `status` é `ready`. Caso contrário, `null`. |
+
+| Status | Significado |
+| --- | --- |
+| `pending` | A Routa ainda está buscando ou validando o arquivo. |
+| `ready` | O arquivo está disponível e uma URL pode ser emitida. |
+| `unavailable` | O arquivo não pode mais ser servido, por exemplo porque a busca falhou de forma permanente ou a retenção venceu. |
+
+<Note>
+  Uma mensagem nunca se perde porque a mídia falhou. Se o download da mídia recebida falha em definitivo, a mensagem continua existindo e a mídia fica `unavailable`.
+</Note>
+
+## Obter a URL de uma mídia
+
+`GET /v1/media/{id}` retorna sempre uma **URL assinada nova**, válida por **15 minutos**. Faça o download logo em seguida e, se precisar do arquivo de novo, peça outra URL.
+
+```bash
+curl https://api.routa.chat/v1/media/med_01J8... \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+Se a mídia ainda estiver `pending`, repita a consulta depois de alguns instantes.
+
+## Enviar ou hospedar mídia
+
+`POST /v1/media` aceita o arquivo de duas formas, escolhidas pelo `Content-Type`:
+
+<Tabs>
+  <Tab title="Enviar os bytes">
+    Envie o arquivo diretamente no corpo, com o `Content-Type` do arquivo.
+
+    ```bash
+    curl https://api.routa.chat/v1/media \
+      -H "Authorization: Bearer $ROUTA_API_KEY" \
+      -H "Content-Type: application/pdf" \
+      --data-binary @contrato.pdf
+    ```
+  </Tab>
+  <Tab title="Hospedar a partir de uma URL">
+    Envie um JSON com `source_url` e a Routa busca o arquivo para você.
+
+    ```bash
+    curl https://api.routa.chat/v1/media \
+      -H "Authorization: Bearer $ROUTA_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{ "source_url": "https://exemplo.com/imagem.png" }'
+    ```
+
+    A URL precisa ser pública. Endereços privados ou reservados são bloqueados (`media_source_blocked`), e uma URL que não responde retorna `media_source_unreachable`.
+  </Tab>
+</Tabs>
+
+A resposta é `201 Created` com o objeto mídia.
+
+## Tipos aceitos e limites
+
+Os tipos e tamanhos seguem os limites do WhatsApp. Um tipo fora da tabela retorna `media_content_type_rejected`, e um arquivo maior que o limite retorna `media_size_limit_exceeded`.
+
+| Tipo | Formatos | Tamanho máximo |
+| --- | --- | --- |
+| Imagem | `image/jpeg`, `image/png` | 5 MB |
+| Imagem (figurinha) | `image/webp` | 500 KB |
+| Vídeo | `video/mp4`, `video/3gpp` | 16 MB |
+| Áudio | `audio/aac`, `audio/mp4`, `audio/mpeg`, `audio/amr`, `audio/ogg` | 16 MB |
+| Documento | `application/pdf`, `text/plain`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx` | 100 MB |
+
+## Retenção
+
+A mídia é mantida por **90 dias**. Depois disso, o objeto passa a `unavailable`.
+
+<Info>
+  Para cabeçalhos de template, use o endpoint próprio [`POST /v1/templates/media`](/api-reference/endpoint/templates/upload-media). Ele tem tipos e limites específicos. Veja [Templates](/concepts/templates).
+</Info>

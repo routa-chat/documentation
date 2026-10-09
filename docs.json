@@ -34,7 +34,8 @@
               "concepts/data-model",
               "concepts/messages",
               "concepts/events",
-              "concepts/templates"
+              "concepts/templates",
+              "concepts/media"
             ]
           }
         ]
