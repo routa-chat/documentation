@@ -22,7 +22,8 @@
           {
             "group": "Comece aqui",
             "pages": [
-              "index"
+              "index",
+              "quickstart"
             ]
           }
         ]

@@ -1,47 +1,134 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Início rápido"
+description: "Crie uma chave de API e envie sua primeira mensagem de WhatsApp em menos de 30 segundos."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+Este guia leva você de zero a uma mensagem de WhatsApp enviada. Você pode usar `curl` ou o [SDK oficial para Node.js](/sdk/overview).
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+## Pré-requisitos
 
-## Prerequisites
+Antes de começar, você precisa de:
 
-Before you begin, you must have:
+- Uma conta no [painel da Routa](https://app.routa.chat).
+- Um **canal** conectado. Um canal é um número de WhatsApp ligado ao seu projeto. Conecte-o no painel; a conexão é feita pelo fluxo guiado de *Embedded Signup*.
+- Para usar o SDK: Node.js 22 ou superior.
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+<Info>
+  Ainda não há endpoint para conectar canais pela API. Conecte o número no painel e use o `id` do canal (`chan_...`) nas chamadas.
+</Info>
 
-## Get started
+## Envie sua primeira mensagem
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Crie uma chave de API">
+    No painel, acesse **Configurações → Chaves de API** e crie uma chave para o seu projeto. A chave começa com `rt_live_` ou `rt_test_` e é exibida **uma única vez**. Copie e guarde em um local seguro.
 
     ```bash
-    npm install your-package
+    export ROUTA_API_KEY="rt_live_..."
+    ```
+
+    Saiba mais em [Autenticação](/authentication).
+  </Step>
+  <Step title="Confirme que a chave funciona">
+    `GET /v1/whoami` não tem efeitos colaterais e retorna a organização, o projeto e os escopos da chave.
+
+    <CodeGroup>
+    ```bash cURL
+    curl https://api.routa.chat/v1/whoami \
+      -H "Authorization: Bearer $ROUTA_API_KEY"
+    ```
+
+    ```ts Node.js
+    import { Routa } from '@routa-chat/sdk'
+
+    const routa = new Routa({ apiKey: process.env.ROUTA_API_KEY! })
+    console.log(await routa.whoami())
+    ```
+    </CodeGroup>
+
+    ```json Resposta
+    {
+      "organization_id": "org_01J8...",
+      "project_id": "proj_01J8...",
+      "api_key_id": "key_01J8...",
+      "scopes": ["messages:read", "messages:write"]
+    }
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+  <Step title="Envie uma mensagem">
+    Informe o canal, o destinatário em formato E.164 e o texto. O header `Idempotency-Key` garante que uma retentativa não gere uma segunda mensagem.
 
-    ```bash
-    your-cli init
+    <CodeGroup>
+    ```bash cURL
+    curl https://api.routa.chat/v1/messages \
+      -H "Authorization: Bearer $ROUTA_API_KEY" \
+      -H "Content-Type: application/json" \
+      -H "Idempotency-Key: $(uuidgen)" \
+      -d '{
+        "channel": "chan_01J8...",
+        "to": "+5581999999999",
+        "text": "Olá! Seu pedido foi confirmado."
+      }'
+    ```
+
+    ```ts Node.js
+    const message = await routa.messages.send({
+      channel: 'chan_01J8...',
+      to: '+5581999999999',
+      text: 'Olá! Seu pedido foi confirmado.',
+    })
+
+    console.log(message.id, message.status) // "msg_...", "accepted"
+    ```
+    </CodeGroup>
+
+    ```json Resposta (202 Accepted)
+    {
+      "id": "msg_01J8...",
+      "channel": "chan_01J8...",
+      "direction": "outbound",
+      "from": "+5581988888888",
+      "to": "+5581999999999",
+      "content": { "type": "text", "body": "Olá! Seu pedido foi confirmado." },
+      "status": "accepted",
+      "metadata": {},
+      "accepted_at": "2026-09-04T13:22:40.812Z",
+      "sent_at": null,
+      "delivered_at": null,
+      "read_at": null,
+      "failed_at": null
+    }
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+  <Step title="Acompanhe a entrega">
+    `status: "accepted"` significa que a Routa recebeu a mensagem, **não** que ela chegou ao destinatário. A mensagem avança por `sent`, `delivered` e `read` (ou `failed`). Consulte o estado atual a qualquer momento:
 
     ```bash
-    your-cli start
+    curl https://api.routa.chat/v1/messages/msg_01J8... \
+      -H "Authorization: Bearer $ROUTA_API_KEY"
     ```
+
+    Em produção, receba cada etapa por [webhooks](/webhooks/overview) em vez de consultar a API repetidamente.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+<Warning>
+  Aceitar uma mensagem não confirma a entrega. Nunca trate `202 Accepted` como mensagem entregue. Veja o [ciclo de vida da mensagem](/concepts/messages).
+</Warning>
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Receba eventos por webhook" icon="webhook" href="/webhooks/overview">
+    Registre um endpoint HTTPS e receba `message.delivered`, `message.read` e `message.received`.
+  </Card>
+  <Card title="Envie templates" icon="file-lines" href="/guides/send-template-message">
+    Envie mensagens com templates aprovados pelo WhatsApp.
+  </Card>
+  <Card title="Trate erros" icon="triangle-exclamation" href="/errors/overview">
+    Entenda o formato de erro e quais falhas valem uma nova tentativa.
+  </Card>
+  <Card title="Referência da API" icon="code" href="/api-reference/introduction">
+    Todos os endpoints, parâmetros e respostas.
+  </Card>
+</CardGroup>
