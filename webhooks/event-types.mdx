@@ -1,0 +1,138 @@
+---
+title: "Tipos de evento"
+description: "Referência dos eventos de mensagem, canal e template que a Routa entrega por webhook e pelo log de eventos."
+---
+
+Todos os eventos compartilham o mesmo [envelope](/concepts/events). O que muda é o `type` e o conteúdo de `data`.
+
+Para assinar um grupo inteiro, use um curinga no `subscribed_types` do endpoint: `message.*`, `channel.*` ou `template.*`.
+
+## Eventos de mensagem
+
+`data` é a [mensagem](/concepts/messages) completa no estado atual.
+
+| Tipo | Disparado quando |
+| --- | --- |
+| `message.accepted` | A Routa aceitou uma mensagem enviada por você. Você já sabe disso pelo `202`, mas pode assinar o evento. |
+| `message.sent` | O provedor aceitou a mensagem. |
+| `message.delivered` | A entrega ao aparelho do destinatário foi confirmada. |
+| `message.read` | O destinatário leu a mensagem. |
+| `message.failed` | A mensagem falhou de forma terminal. |
+| `message.received` | Uma mensagem de um cliente chegou ao seu canal. |
+
+```json message.delivered
+{
+  "id": "evt_01J8ZK9M3Q7X...",
+  "type": "message.delivered",
+  "api_version": "v1",
+  "schema_version": 1,
+  "project_id": "proj_01J8...",
+  "sequence": 918273,
+  "occurred_at": "2026-09-04T13:22:41.031Z",
+  "recorded_at": "2026-09-04T13:22:41.244Z",
+  "data": {
+    "id": "msg_01J8...",
+    "channel": "chan_01J8...",
+    "direction": "outbound",
+    "from": "+5581988888888",
+    "to": "+5581999999999",
+    "content": { "type": "text", "body": "Olá! Seu pedido foi confirmado." },
+    "status": "delivered",
+    "metadata": { "order_id": "1234" },
+    "accepted_at": "2026-09-04T13:22:40.812Z",
+    "sent_at": "2026-09-04T13:22:41.031Z",
+    "delivered_at": "2026-09-04T13:22:42.402Z",
+    "read_at": null,
+    "failed_at": null
+  }
+}
+```
+
+<Note>
+  Um evento de mensagem sempre carrega o estado completo da mensagem naquele momento. Se você perder `message.sent` mas receber `message.delivered`, ainda tem `sent_at` e todos os campos.
+</Note>
+
+## Eventos de canal
+
+### `channel.status_changed`
+
+Disparado quando o status de um canal muda, por exemplo quando ele passa a `degraded` por falhas de autenticação com o provedor. Aja cedo: um canal `degraded` precisa de atenção no painel.
+
+`data` traz o canal e a transição:
+
+| Campo | Descrição |
+| --- | --- |
+| `channel_id` | Id do canal. |
+| `status` | Novo status: `pending`, `active`, `degraded` ou `disabled`. |
+| `previous_status` | Status anterior, ou `null` na criação. |
+
+```json
+{
+  "id": "evt_01J8...",
+  "type": "channel.status_changed",
+  "api_version": "v1",
+  "schema_version": 1,
+  "project_id": "proj_01J8...",
+  "sequence": 918400,
+  "occurred_at": "2026-09-04T14:00:00.000Z",
+  "recorded_at": "2026-09-04T14:00:00.120Z",
+  "data": {
+    "channel_id": "chan_01J8...",
+    "status": "degraded",
+    "previous_status": "active"
+  }
+}
+```
+
+## Eventos de template
+
+`data` é o [template](/concepts/templates) completo no estado atual.
+
+| Tipo | Disparado quando |
+| --- | --- |
+| `template.submitted` | O template foi enviado para análise. |
+| `template.pending` | A análise está em andamento. |
+| `template.approved` | O template foi aprovado e já pode ser usado para enviar. |
+| `template.rejected` | O template foi rejeitado. Veja `rejection_reason` em `data`. |
+| `template.paused` | O provedor pausou o template. |
+| `template.disabled` | O provedor desativou o template. |
+
+```json template.approved
+{
+  "id": "evt_01J8...",
+  "type": "template.approved",
+  "api_version": "v1",
+  "schema_version": 1,
+  "project_id": "proj_01J8...",
+  "sequence": 918500,
+  "occurred_at": "2026-09-04T15:10:00.000Z",
+  "recorded_at": "2026-09-04T15:10:00.200Z",
+  "data": {
+    "id": "tmpl_01J8...",
+    "channel": "chan_01J8...",
+    "name": "confirmacao_pedido",
+    "language": "pt_BR",
+    "category": "utility",
+    "variables": [{ "index": 1 }, { "index": 2 }],
+    "status": "approved",
+    "rejection_reason": null,
+    "created_at": "2026-09-04T15:00:00.000Z",
+    "updated_at": "2026-09-04T15:10:00.000Z"
+  }
+}
+```
+
+## Tipos novos
+
+Novos tipos de evento podem ser introduzidos a qualquer momento, sem aviso de versão. Como cada endpoint assina uma lista explícita, um tipo novo só chega até você se ele pertencer a um curinga que você assinou. Faça sempre um tratamento padrão que **ignora** o que você não reconhece.
+
+```ts
+switch (event.type) {
+  case 'message.delivered':
+    // ...
+    break
+  default:
+    // tipo desconhecido: ignore com segurança
+    break
+}
+```

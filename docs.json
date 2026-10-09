@@ -52,7 +52,8 @@
             "pages": [
               "webhooks/overview",
               "webhooks/signatures",
-              "webhooks/retries-and-replay"
+              "webhooks/retries-and-replay",
+              "webhooks/event-types"
             ]
           }
         ]
