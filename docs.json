@@ -129,6 +129,13 @@
               "api-reference/endpoint/templates/retrieve",
               "api-reference/endpoint/templates/upload-media"
             ]
+          },
+          {
+            "group": "Mídia",
+            "pages": [
+              "api-reference/endpoint/media/upload",
+              "api-reference/endpoint/media/retrieve"
+            ]
           }
         ]
       }
