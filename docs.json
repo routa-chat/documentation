@@ -41,7 +41,8 @@
           {
             "group": "Guias",
             "pages": [
-              "guides/send-text-message"
+              "guides/send-text-message",
+              "guides/send-template-message"
             ]
           }
         ]

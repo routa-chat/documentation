@@ -1,0 +1,99 @@
+---
+title: "Enviar um template"
+description: "Submeta um template, aguarde a aprovação e envie-o com parâmetros usando POST /v1/messages."
+---
+
+Use um template para enviar uma mensagem aprovada pelo WhatsApp, com valores variáveis preenchidos por você. Para entender o ciclo de aprovação, veja [Templates](/concepts/templates).
+
+<Note>
+  Escopos necessários: `templates:write` para submeter, `templates:read` para consultar e `messages:write` para enviar.
+</Note>
+
+<Steps>
+  <Step title="Submeta o template">
+    <CodeGroup>
+    ```bash cURL
+    curl https://api.routa.chat/v1/templates \
+      -H "Authorization: Bearer $ROUTA_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "channel": "chan_01J8...",
+        "name": "confirmacao_pedido",
+        "language": "pt_BR",
+        "category": "utility",
+        "body_text": "Olá {{1}}! Seu pedido {{2}} foi confirmado."
+      }'
+    ```
+
+    ```ts Node.js
+    const template = await routa.templates.submit({
+      channel: 'chan_01J8...',
+      name: 'confirmacao_pedido',
+      language: 'pt_BR',
+      category: 'utility',
+      bodyText: 'Olá {{1}}! Seu pedido {{2}} foi confirmado.',
+    })
+
+    console.log(template.id, template.status)
+    ```
+    </CodeGroup>
+
+    A resposta traz `variables` com os placeholders do corpo e o `status` inicial.
+  </Step>
+  <Step title="Aguarde a aprovação">
+    O provedor decide no tempo dele. Acompanhe de duas formas:
+
+    - **Webhook:** assine `template.*` e espere `template.approved` ou `template.rejected`.
+    - **Consulta:** `GET /v1/templates/{id}` e verifique `status`.
+
+    ```bash
+    curl https://api.routa.chat/v1/templates/tmpl_01J8... \
+      -H "Authorization: Bearer $ROUTA_API_KEY"
+    ```
+
+    Se o template for rejeitado, `rejection_reason` indica o motivo. Corrija e submeta de novo com outro nome.
+  </Step>
+  <Step title="Envie com parâmetros">
+    Com o template `approved`, passe `template.id` e os `body_parameters` na ordem dos placeholders.
+
+    <CodeGroup>
+    ```bash cURL
+    curl https://api.routa.chat/v1/messages \
+      -H "Authorization: Bearer $ROUTA_API_KEY" \
+      -H "Content-Type: application/json" \
+      -H "Idempotency-Key: $(uuidgen)" \
+      -d '{
+        "channel": "chan_01J8...",
+        "to": "+5581999999999",
+        "template": {
+          "id": "tmpl_01J8...",
+          "body_parameters": ["Ana", "#1234"]
+        }
+      }'
+    ```
+
+    ```ts Node.js
+    await routa.messages.send({
+      channel: 'chan_01J8...',
+      to: '+5581999999999',
+      template: { id: 'tmpl_01J8...', bodyParameters: ['Ana', '#1234'] },
+    })
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Regras de validação
+
+A Routa valida o template no aceite, então estes erros voltam na hora:
+
+| Código | Causa |
+| --- | --- |
+| `template_not_found` | O template não existe neste projeto (`404`). |
+| `template_not_approved` | O template ainda não foi aprovado, ou foi rejeitado ou desativado (`422`). |
+| `template_paused` | O provedor pausou o template (`422`). |
+| `content_rejected` | A quantidade de `body_parameters` não bate com as variáveis do template (`422`). |
+
+<Info>
+  O SDK expõe `templates.submit()` apenas com corpo de texto. Para cabeçalho, rodapé e botões, use a API REST diretamente. Veja [Templates](/concepts/templates#componentes-ricos).
+</Info>
