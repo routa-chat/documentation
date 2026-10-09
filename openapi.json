@@ -1,0 +1,3712 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "API da Routa",
+    "description": "API REST para enviar e receber mensagens de WhatsApp, acompanhar a entrega e receber eventos normalizados por webhook.",
+    "version": "1"
+  },
+  "servers": [
+    {
+      "url": "https://api.routa.chat",
+      "description": "Produção"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Mensagens",
+      "description": "Envie, consulte e liste mensagens."
+    },
+    {
+      "name": "Eventos",
+      "description": "Consulte o log de eventos normalizados."
+    },
+    {
+      "name": "Webhooks",
+      "description": "Gerencie endpoints de webhook, segredos e entregas."
+    },
+    {
+      "name": "Templates",
+      "description": "Submeta e consulte templates de WhatsApp."
+    },
+    {
+      "name": "Mídia",
+      "description": "Envie e obtenha arquivos de mídia."
+    },
+    {
+      "name": "Uso",
+      "description": "Consulte o uso medido do projeto."
+    },
+    {
+      "name": "Identidade",
+      "description": "Identifique a chave de API em uso."
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/v1/messages": {
+      "post": {
+        "operationId": "sendMessage",
+        "tags": [
+          "Mensagens"
+        ],
+        "summary": "Enviar mensagem",
+        "description": "Envia uma mensagem de texto ou de template por um canal.\n\nA resposta é `202 Accepted`: a mensagem foi gravada de forma durável, mas **ainda não foi entregue**. Acompanhe `sent`, `delivered`, `read` e `failed` por [webhooks](/webhooks/overview) ou por `GET /v1/messages/{id}`.\n\nInforme **exatamente um** entre `text` e `template`. Envie o header `Idempotency-Key` para repetir a requisição com segurança. Veja [Idempotência](/reliability/idempotency).\n\nA validação do canal, do destinatário e do template acontece no aceite e retorna `422` imediatamente.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Chave única por mensagem lógica (um UUID v4, por exemplo). Repetir a requisição com a mesma chave e o mesmo corpo devolve a resposta original, com o header `Idempotent-Replay: true`. Uma chave reutilizada com outro corpo retorna `409 idempotency_key_reuse`. O registro é mantido por 24 horas.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "6f0a9d9e-3c1f-4e56-9a64-2b7f6a5c1d10"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channel",
+                  "to"
+                ],
+                "properties": {
+                  "channel": {
+                    "description": "Identificador do canal pelo qual enviar (`chan_...`).",
+                    "type": "string",
+                    "example": "chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+                  },
+                  "to": {
+                    "pattern": "^\\+?[1-9]\\d{1,14}$",
+                    "description": "Destinatário em formato E.164, por exemplo `+5581999999999`. O `+` inicial é opcional. O formato é verificado aqui; se o número não pode existir no país indicado, a API retorna `invalid_recipient`.",
+                    "type": "string",
+                    "example": "+5581999999999"
+                  },
+                  "text": {
+                    "description": "Corpo da mensagem de texto. Não pode ser usado junto com `template`.",
+                    "type": "string",
+                    "example": "Olá! Seu pedido foi confirmado."
+                  },
+                  "template": {
+                    "type": "object",
+                    "required": [
+                      "id"
+                    ],
+                    "properties": {
+                      "id": {
+                        "description": "Identificador do template (`tmpl_...`). O template precisa estar `approved`.",
+                        "type": "string",
+                        "example": "tmpl_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+                      },
+                      "body_parameters": {
+                        "description": "Valores posicionais para os placeholders `{{1}}`, `{{2}}`, … do corpo do template, na ordem. A quantidade precisa bater com a de variáveis do template.",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "description": "Template aprovado a enviar. Não pode ser usado junto com `text`."
+                  },
+                  "metadata": {
+                    "maxProperties": 20,
+                    "description": "Até 20 pares chave-valor de texto, de propriedade do cliente, com 1 KB no total. É devolvido na consulta e nos eventos.",
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "example": {
+                "channel": "chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ",
+                "to": "+5581999999999",
+                "text": "Olá! Seu pedido foi confirmado.",
+                "metadata": {
+                  "order_id": "1234"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Aceito. O processamento é assíncrono",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Franquia ou limite do plano esgotado (`message_quota_exceeded`, `subscription_required`, `payment_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflito de idempotência ou de estado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "messages:write"
+            ]
+          }
+        ],
+        "x-required-scope": "messages:write"
+      },
+      "get": {
+        "operationId": "listMessages",
+        "tags": [
+          "Mensagens"
+        ],
+        "summary": "Listar mensagens",
+        "description": "Lista as mensagens do projeto, da mais recente para a mais antiga, com paginação por cursor. Filtre por `direction` para ver só as recebidas ou só as enviadas.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "inbound",
+                "outbound"
+              ]
+            },
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "description": "Filtra pela direção da mensagem: `inbound` (recebida) ou `outbound` (enviada)."
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Quantidade de itens por página, de 1 a 100. O padrão é 20."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "description": "Valor de `next_cursor` da página anterior. Trate-o como opaco."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "messages:read"
+            ]
+          }
+        ],
+        "x-required-scope": "messages:read"
+      }
+    },
+    "/v1/messages/{id}": {
+      "get": {
+        "operationId": "retrieveMessage",
+        "tags": [
+          "Mensagens"
+        ],
+        "summary": "Consultar mensagem",
+        "description": "Retorna uma mensagem com o status atual e os horários de cada etapa (`sent_at`, `delivered_at`, `read_at`, `failed_at`).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador da mensagem (`msg_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "messages:read"
+            ]
+          }
+        ],
+        "x-required-scope": "messages:read"
+      }
+    },
+    "/v1/messages/{id}/read": {
+      "post": {
+        "operationId": "markMessageAsRead",
+        "tags": [
+          "Mensagens"
+        ],
+        "summary": "Marcar mensagem como lida",
+        "description": "Marca uma mensagem **recebida** (`inbound`) como lida e envia a confirmação de leitura ao remetente. Para uma mensagem enviada por você, retorna `422` com o código `message_direction_invalid`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador da mensagem recebida (`msg_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "messages:write"
+            ]
+          }
+        ],
+        "x-required-scope": "messages:write"
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "operationId": "listEvents",
+        "tags": [
+          "Eventos"
+        ],
+        "summary": "Listar eventos",
+        "description": "Lista os eventos do projeto em ordem crescente de `sequence`, do mais antigo para o mais recente. É o caminho de **reconciliação** para quem perdeu entregas de webhook: guarde o `id` do último evento processado e passe-o em `after`.\n\nOs eventos ficam disponíveis por 90 dias. Veja [Reconciliar eventos](/webhooks/reconciliation).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "message.accepted",
+                "message.sent",
+                "message.delivered",
+                "message.read",
+                "message.failed",
+                "message.received",
+                "channel.status_changed",
+                "template.submitted",
+                "template.pending",
+                "template.approved",
+                "template.rejected",
+                "template.paused",
+                "template.disabled"
+              ]
+            },
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "description": "Filtra por tipo de evento."
+          },
+          {
+            "description": "Retoma a listagem depois deste id de evento (`evt_...`).",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "after",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Quantidade de itens por página, de 1 a 100. O padrão é 20."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "events:read"
+            ]
+          }
+        ],
+        "x-required-scope": "events:read"
+      }
+    },
+    "/v1/webhook_endpoints": {
+      "post": {
+        "operationId": "createWebhookEndpoint",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Criar endpoint de webhook",
+        "description": "Registra uma URL para receber eventos. A resposta inclui o `secret` de assinatura, **exibido uma única vez**. Guarde-o para [verificar as assinaturas](/webhooks/signatures).\n\nA URL deve usar HTTPS e não pode apontar para endereços privados. `http://localhost` é aceito apenas em projetos de teste. Cada projeto pode ter até 5 endpoints.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "subscribed_types"
+                ],
+                "properties": {
+                  "url": {
+                    "description": "URL HTTPS que recebe os eventos. `http://` é aceito apenas para localhost em projetos de teste.",
+                    "type": "string",
+                    "example": "https://exemplo.com/webhooks/routa"
+                  },
+                  "subscribed_types": {
+                    "minItems": 1,
+                    "description": "Tipos de evento ou curingas por recurso (`message.*`, `channel.*`, `template.*`). Pelo menos um.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "message.*",
+                      "channel.status_changed"
+                    ]
+                  }
+                }
+              },
+              "example": {
+                "url": "https://exemplo.com/webhooks/routa",
+                "subscribed_types": [
+                  "message.*",
+                  "channel.status_changed"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recurso criado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      },
+      "get": {
+        "operationId": "listWebhookEndpoints",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Listar endpoints de webhook",
+        "description": "Lista os endpoints de webhook do projeto (no máximo 5). O `secret` nunca é retornado nas listagens.",
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
+    },
+    "/v1/webhook_endpoints/{id}": {
+      "get": {
+        "operationId": "retrieveWebhookEndpoint",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Consultar endpoint de webhook",
+        "description": "Retorna um endpoint, incluindo `status`, `consecutive_failures` e os horários do último sucesso e da última falha.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador do endpoint (`whe_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      },
+      "patch": {
+        "operationId": "updateWebhookEndpoint",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Atualizar tipos assinados",
+        "description": "Substitui a lista de tipos de evento assinados pelo endpoint. A lista não pode ser vazia e aceita curingas como `message.*`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador do endpoint (`whe_...`)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "subscribed_types"
+                ],
+                "properties": {
+                  "subscribed_types": {
+                    "minItems": 1,
+                    "description": "Nova lista de tipos ou curingas. Substitui a lista atual.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "message.delivered",
+                      "message.failed"
+                    ]
+                  }
+                }
+              },
+              "example": {
+                "subscribed_types": [
+                  "message.delivered",
+                  "message.failed"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
+    },
+    "/v1/webhook_endpoints/{id}/rotate_secret": {
+      "post": {
+        "operationId": "rotateWebhookEndpointSecret",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Rotacionar segredo",
+        "description": "Gera um novo segredo de assinatura e o retorna. O segredo anterior continua válido por **24 horas**, e durante esse período as entregas são assinadas com os dois. Veja [Verificar assinaturas](/webhooks/signatures).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador do endpoint (`whe_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
+    },
+    "/v1/webhook_endpoints/{id}/disable": {
+      "post": {
+        "operationId": "disableWebhookEndpoint",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Desativar endpoint",
+        "description": "Pausa as entregas para o endpoint (`status: disabled_by_user`). Os eventos continuam sendo gravados no log.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador do endpoint (`whe_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
+    },
+    "/v1/webhook_endpoints/{id}/enable": {
+      "post": {
+        "operationId": "enableWebhookEndpoint",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Reativar endpoint",
+        "description": "Reativa um endpoint desativado e **reenvia em lote** todas as entregas esgotadas. A resposta informa quantas foram reenviadas em `replayed_count`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador do endpoint (`whe_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "subscribed_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "api_version": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "enabled",
+                        "disabled_by_user",
+                        "disabled_by_system"
+                      ]
+                    },
+                    "consecutive_failures": {
+                      "type": "number"
+                    },
+                    "last_success_at": {
+                      "format": "date-time",
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "last_failure_at": {
+                      "format": "date-time",
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "replayed_count": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "url",
+                    "subscribed_types",
+                    "api_version",
+                    "status",
+                    "consecutive_failures",
+                    "last_success_at",
+                    "last_failure_at",
+                    "created_at",
+                    "replayed_count"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
+    },
+    "/v1/webhook_endpoints/{id}/deliveries": {
+      "get": {
+        "operationId": "listWebhookDeliveries",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Listar entregas",
+        "description": "Lista as entregas de um endpoint, da mais recente para a mais antiga. Filtre por `state=exhausted` para ver as entregas que esgotaram as tentativas. As entregas ficam consultáveis por 30 dias.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador do endpoint (`whe_...`)."
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "in_flight",
+                "retrying",
+                "succeeded",
+                "exhausted"
+              ]
+            },
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "description": "Filtra pelo estado da entrega."
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Quantidade de itens por página, de 1 a 100. O padrão é 20."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "description": "Valor de `next_cursor` da página anterior. Trate-o como opaco."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
+    },
+    "/v1/webhook_endpoints/{id}/deliveries/{deliveryId}/replay": {
+      "post": {
+        "operationId": "replayWebhookDelivery",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Reenviar uma entrega",
+        "description": "Reenvia uma entrega no estado `exhausted`. Uma entrega em outro estado retorna `409` com o código `webhook_delivery_not_replayable`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador do endpoint (`whe_...`)."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "deliveryId",
+            "required": true,
+            "description": "Identificador da entrega (`whd_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflito de idempotência ou de estado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
+    },
+    "/v1/webhook_endpoints/{id}/deliveries/replay": {
+      "post": {
+        "operationId": "replayWebhookDeliveries",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Reenviar todas as entregas esgotadas",
+        "description": "Reenvia, de uma vez, todas as entregas esgotadas do endpoint. Retorna a quantidade reenviada.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador do endpoint (`whe_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
+    },
+    "/v1/templates": {
+      "post": {
+        "operationId": "createTemplate",
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Submeter template",
+        "description": "Cria um template e o envia ao WhatsApp para aprovação. A aprovação é decidida pelo provedor, no tempo dele. Acompanhe pelos eventos `template.*` ou consultando o template.\n\nSomente templates `approved` podem ser usados em `POST /v1/messages`. Veja [Templates](/concepts/templates).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channel",
+                  "name",
+                  "language",
+                  "category",
+                  "body_text"
+                ],
+                "properties": {
+                  "channel": {
+                    "description": "Canal ao qual o template pertence (`chan_...`).",
+                    "type": "string",
+                    "example": "chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+                  },
+                  "name": {
+                    "description": "Nome do template.",
+                    "type": "string",
+                    "example": "confirmacao_pedido"
+                  },
+                  "language": {
+                    "description": "Código de idioma, por exemplo `pt_BR` ou `en_US`.",
+                    "type": "string",
+                    "example": "pt_BR"
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "marketing",
+                      "utility",
+                      "authentication"
+                    ],
+                    "description": "Categoria do template: `marketing`, `utility` ou `authentication`."
+                  },
+                  "body_text": {
+                    "description": "Corpo do template, com placeholders posicionais `{{1}}`, `{{2}}`, …",
+                    "type": "string",
+                    "example": "Olá {{1}}! Seu pedido {{2}} foi confirmado."
+                  },
+                  "components": {
+                    "description": "Componentes opcionais: cabeçalho de texto ou de mídia, rodapé e até 10 botões. Omita o campo para um template só de texto.",
+                    "type": "object",
+                    "properties": {
+                      "header": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "kind",
+                              "text"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "text"
+                                ]
+                              },
+                              "text": {
+                                "description": "Header text, at most 60 characters, at most one `{{1}}` placeholder.",
+                                "type": "string"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "kind",
+                              "media_id"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "media"
+                                ]
+                              },
+                              "media_id": {
+                                "description": "A `TemplateMedia` id from `POST /v1/templates/media`.",
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ],
+                        "description": "Cabeçalho de texto (até 60 caracteres e uma variável) ou de mídia (um `media_id` de `POST /v1/templates/media`)."
+                      },
+                      "footer": {
+                        "type": "object",
+                        "required": [
+                          "text"
+                        ],
+                        "properties": {
+                          "text": {
+                            "description": "Footer text, at most 60 characters.",
+                            "type": "string"
+                          }
+                        },
+                        "description": "Rodapé em texto, com até 60 caracteres."
+                      },
+                      "buttons": {
+                        "description": "Até 10 botões. No máximo um botão `phone_number`. O texto de cada botão tem até 25 caracteres, e a URL de um botão `url` pode ter uma variável `{{1}}`.",
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "kind",
+                                "text"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "quick_reply"
+                                  ]
+                                },
+                                "text": {
+                                  "description": "Button label, at most 25 characters.",
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "kind",
+                                "text",
+                                "phone_number"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "phone_number"
+                                  ]
+                                },
+                                "text": {
+                                  "description": "Button label, at most 25 characters.",
+                                  "type": "string"
+                                },
+                                "phone_number": {
+                                  "description": "The phone number the button dials.",
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "kind",
+                                "text",
+                                "url"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "url"
+                                  ]
+                                },
+                                "text": {
+                                  "description": "Button label, at most 25 characters.",
+                                  "type": "string"
+                                },
+                                "url": {
+                                  "description": "Destination URL. May contain exactly one `{{1}}` placeholder.",
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "example": {
+                "channel": "chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ",
+                "name": "confirmacao_pedido",
+                "language": "pt_BR",
+                "category": "utility",
+                "body_text": "Olá {{1}}! Seu pedido {{2}} foi confirmado."
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recurso criado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "templates:write"
+            ]
+          }
+        ],
+        "x-required-scope": "templates:write"
+      },
+      "get": {
+        "operationId": "listTemplates",
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Listar templates",
+        "description": "Lista os templates do projeto com paginação por cursor. Filtre por canal com `channel`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "description": "Filtra pelo id do canal (`chan_...`)."
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Quantidade de itens por página, de 1 a 100. O padrão é 20."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "description": "Valor de `next_cursor` da página anterior. Trate-o como opaco."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "templates:read"
+            ]
+          }
+        ],
+        "x-required-scope": "templates:read"
+      }
+    },
+    "/v1/templates/{id}": {
+      "get": {
+        "operationId": "retrieveTemplate",
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Consultar template",
+        "description": "Retorna um template com o `status` de aprovação atual. Se ele foi rejeitado, `rejection_reason` indica o motivo.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador do template (`tmpl_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "templates:read"
+            ]
+          }
+        ],
+        "x-required-scope": "templates:read"
+      }
+    },
+    "/v1/templates/media": {
+      "post": {
+        "operationId": "uploadTemplateMedia",
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Enviar mídia de cabeçalho",
+        "description": "Envia uma imagem, um vídeo ou um documento para usar como cabeçalho de um template. Envie os bytes do arquivo **diretamente no corpo**, com o `Content-Type` do arquivo. O formato é deduzido do tipo.\n\n| Formato | Tipos aceitos | Tamanho máximo |\n| --- | --- | --- |\n| `image` | `image/jpeg`, `image/png` | 5 MB |\n| `video` | `video/mp4` | 16 MB |\n| `document` | `application/pdf` | 100 MB |\n\nUse o `id` retornado em `components.header.media_id` ao submeter o template.",
+        "requestBody": {
+          "required": true,
+          "description": "Os bytes do arquivo, com o `Content-Type` do arquivo (por exemplo `image/png`).",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recurso criado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateMedia"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "templates:write"
+            ]
+          }
+        ],
+        "x-required-scope": "templates:write"
+      }
+    },
+    "/v1/media": {
+      "post": {
+        "operationId": "uploadMedia",
+        "tags": [
+          "Mídia"
+        ],
+        "summary": "Enviar ou hospedar mídia",
+        "description": "Armazena um arquivo de mídia sob custódia da Routa. Há duas formas, escolhidas pelo `Content-Type`:\n\n- **Bytes:** envie o arquivo no corpo, com o `Content-Type` do arquivo.\n- **URL:** envie `application/json` com `{ \"source_url\": \"https://...\" }` e a Routa baixa o arquivo. A URL precisa ser pública.\n\nOs tipos e os tamanhos aceitos seguem os limites do WhatsApp. Veja [Mídia](/concepts/media).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "source_url"
+                ],
+                "properties": {
+                  "source_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "URL pública do arquivo que a Routa deve baixar.",
+                    "example": "https://exemplo.com/imagem.png"
+                  }
+                }
+              }
+            },
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "Os bytes do arquivo. Use o `Content-Type` real do arquivo, por exemplo `image/jpeg`."
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recurso criado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Media"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "media:write"
+            ]
+          }
+        ],
+        "x-required-scope": "media:write"
+      }
+    },
+    "/v1/media/{id}": {
+      "get": {
+        "operationId": "retrieveMedia",
+        "tags": [
+          "Mídia"
+        ],
+        "summary": "Consultar mídia",
+        "description": "Retorna o objeto de mídia com uma **URL assinada nova**, válida por 15 minutos, quando `status` é `ready`. Se estiver `pending`, repita a consulta em instantes.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador da mídia (`med_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Media"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe ou pertence a outro projeto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "media:read"
+            ]
+          }
+        ],
+        "x-required-scope": "media:read"
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "operationId": "retrieveUsage",
+        "tags": [
+          "Uso"
+        ],
+        "summary": "Consultar uso",
+        "description": "Retorna o uso medido do projeto no período, com uma linha por combinação de métrica, tipo de canal e provedor. O dia corrente ainda aberto é lido ao vivo. O intervalo tem no máximo 92 dias.",
+        "parameters": [
+          {
+            "description": "Data UTC inicial, no formato `YYYY-MM-DD`, inclusiva.",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "description": "Data UTC final, no formato `YYYY-MM-DD`, exclusiva. O intervalo tem no máximo 92 dias.",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "to",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [
+              "usage:read"
+            ]
+          }
+        ],
+        "x-required-scope": "usage:read"
+      }
+    },
+    "/v1/whoami": {
+      "get": {
+        "operationId": "whoami",
+        "tags": [
+          "Identidade"
+        ],
+        "summary": "Identificar a chave de API",
+        "description": "Resolve a chave de API em uso para a organização, o projeto e os escopos que ela possui. Não tem efeitos colaterais e aceita qualquer chave válida, o que o torna ideal para verificar uma chave.",
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Whoami"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Chave de API do projeto, no formato `rt_live_...` ou `rt_test_...`, enviada como `Authorization: Bearer <chave>`."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "type",
+              "code",
+              "message",
+              "request_id"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Categoria do erro: `invalid_request_error`, `authentication_error`, `permission_error`, `not_found_error`, `conflict_error`, `rate_limit_error`, `billing_error` ou `api_error`.",
+                "example": "invalid_request_error"
+              },
+              "code": {
+                "type": "string",
+                "description": "Código estável e legível por máquina. Veja [Códigos de erro](/errors/error-codes).",
+                "example": "channel_inactive"
+              },
+              "message": {
+                "type": "string",
+                "description": "Texto para humanos, em inglês. Pode mudar, então não faça parse dele.",
+                "example": "Channel chan_01J8... is not active and cannot send messages."
+              },
+              "param": {
+                "type": "string",
+                "description": "O campo da requisição com problema, quando se aplica."
+              },
+              "doc_url": {
+                "type": "string",
+                "description": "Link para a documentação do código, quando disponível."
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                },
+                "description": "Valores acionáveis, como `limit`, `used` e `resets_at` em `message_quota_exceeded`."
+              },
+              "request_id": {
+                "type": "string",
+                "description": "Identificador da requisição. Informe-o ao falar com o suporte.",
+                "example": "req_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+              }
+            },
+            "description": "Detalhes do erro."
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador da mensagem.",
+            "example": "msg_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "channel": {
+            "type": "string",
+            "description": "Identificador do canal usado.",
+            "example": "chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "outbound",
+              "inbound"
+            ],
+            "description": "Direção da mensagem: `outbound` (enviada por você) ou `inbound` (recebida)."
+          },
+          "from": {
+            "type": "string",
+            "description": "Endereço de origem, em E.164.",
+            "example": "+5581988888888"
+          },
+          "to": {
+            "type": "string",
+            "description": "Endereço de destino, em E.164.",
+            "example": "+5581999999999"
+          },
+          "content": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "body"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "text"
+                    ]
+                  },
+                  "body": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "media_id"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "image"
+                    ]
+                  },
+                  "media_id": {
+                    "type": "string"
+                  },
+                  "caption": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "media_id"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "document"
+                    ]
+                  },
+                  "media_id": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "caption": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "media_id"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "audio"
+                    ]
+                  },
+                  "media_id": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "media_id"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "video"
+                    ]
+                  },
+                  "media_id": {
+                    "type": "string"
+                  },
+                  "caption": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "media_id"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "sticker"
+                    ]
+                  },
+                  "media_id": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "latitude",
+                  "longitude"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "location"
+                    ]
+                  },
+                  "latitude": {
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "target_message_id",
+                  "emoji"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "reaction"
+                    ]
+                  },
+                  "target_message_id": {
+                    "type": "string"
+                  },
+                  "emoji": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "template_id",
+                  "body_parameters"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "template"
+                    ]
+                  },
+                  "template_id": {
+                    "type": "string"
+                  },
+                  "body_parameters": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "unsupported"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "Conteúdo da mensagem. O campo `type` indica o formato."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "sent",
+              "delivered",
+              "read",
+              "failed"
+            ],
+            "description": "Estado atual no ciclo de vida. O status nunca retrocede."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Até 20 pares chave-valor de texto, de propriedade do cliente."
+          },
+          "accepted_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando a Routa aceitou a mensagem.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "sent_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando o provedor aceitou a mensagem. `null` se ainda não ocorreu.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "delivered_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando a entrega foi confirmada. `null` se ainda não ocorreu.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "read_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando o destinatário leu. `null` se ainda não ocorreu.",
+            "example": null
+          },
+          "failed_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando a mensagem falhou. `null` se não falhou.",
+            "example": null
+          }
+        },
+        "required": [
+          "id",
+          "channel",
+          "direction",
+          "from",
+          "to",
+          "content",
+          "status",
+          "metadata",
+          "accepted_at",
+          "sent_at",
+          "delivered_at",
+          "read_at",
+          "failed_at"
+        ]
+      },
+      "MessageList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "description": "Mensagens da página."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Indica se existem mais páginas."
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Cursor da próxima página, ou `null` na última."
+          }
+        },
+        "required": [
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "api_version",
+          "schema_version",
+          "project_id",
+          "sequence",
+          "occurred_at",
+          "recorded_at",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador do evento. É a chave de deduplicação.",
+            "example": "evt_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "message.accepted",
+              "message.sent",
+              "message.delivered",
+              "message.read",
+              "message.failed",
+              "message.received",
+              "channel.status_changed",
+              "template.submitted",
+              "template.pending",
+              "template.approved",
+              "template.rejected",
+              "template.paused",
+              "template.disabled"
+            ],
+            "description": "Tipo do evento, no formato `recurso.ação_no_passado`."
+          },
+          "api_version": {
+            "type": "string",
+            "description": "Versão do formato público do recurso em `data`.",
+            "example": "v1"
+          },
+          "schema_version": {
+            "type": "number",
+            "description": "Versão do envelope do evento.",
+            "example": 1
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Projeto dono do evento.",
+            "example": "proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "sequence": {
+            "type": "number",
+            "description": "Número monotônico, útil para detectar lacunas. Não é uma promessa de ordem de entrega."
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando o fato ocorreu.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando a Routa registrou o evento.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "data": {
+            "description": "O recurso completo no estado atual, não um diff. Para eventos de mensagem é a mensagem, para eventos de template é o template."
+          }
+        }
+      },
+      "EventList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "description": "Eventos da página."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Indica se existem mais eventos."
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Id do último evento da página, ou `null` na última. Use-o em `after`."
+          }
+        },
+        "required": [
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "Template": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador do template.",
+            "example": "tmpl_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "channel": {
+            "type": "string",
+            "description": "Canal ao qual o template pertence.",
+            "example": "chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nome do template.",
+            "example": "confirmacao_pedido"
+          },
+          "language": {
+            "type": "string",
+            "description": "Código de idioma.",
+            "example": "pt_BR"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "marketing",
+              "utility",
+              "authentication"
+            ],
+            "description": "Categoria: `marketing`, `utility` ou `authentication`."
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "index"
+              ],
+              "properties": {
+                "index": {
+                  "type": "number"
+                }
+              }
+            },
+            "description": "Placeholders posicionais do corpo (`{{1}}`, `{{2}}`, …)."
+          },
+          "components": {
+            "type": "object",
+            "properties": {
+              "header": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "text"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "text"
+                        ]
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "format",
+                      "media_id"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "media"
+                        ]
+                      },
+                      "format": {
+                        "type": "string",
+                        "enum": [
+                          "image",
+                          "video",
+                          "document"
+                        ]
+                      },
+                      "media_id": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                ]
+              },
+              "footer": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                }
+              },
+              "buttons": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "text"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "quick_reply"
+                          ]
+                        },
+                        "text": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "text",
+                        "phone_number"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "phone_number"
+                          ]
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "phone_number": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "text",
+                        "url"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "url"
+                          ]
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Cabeçalho, rodapé e botões do template, quando existirem."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "submitted",
+              "pending",
+              "approved",
+              "rejected",
+              "paused",
+              "disabled"
+            ],
+            "description": "Estado de aprovação. Somente `approved` permite enviar."
+          },
+          "rejection_reason": {
+            "type": "string",
+            "enum": [
+              "abusive_content",
+              "incorrect_category",
+              "invalid_format",
+              "scam",
+              "tag_content_mismatch",
+              "other"
+            ],
+            "nullable": true,
+            "description": "Motivo da rejeição, quando `status` é `rejected`."
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando o template foi criado.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando o template foi atualizado pela última vez.",
+            "example": "2026-09-04T13:22:41.031Z"
+          }
+        },
+        "required": [
+          "id",
+          "channel",
+          "name",
+          "language",
+          "category",
+          "variables",
+          "status",
+          "rejection_reason",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "TemplateList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Template"
+            },
+            "description": "Templates da página."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Indica se existem mais páginas."
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Cursor da próxima página, ou `null` na última."
+          }
+        },
+        "required": [
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador do endpoint.",
+            "example": "whe_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL que recebe os eventos.",
+            "example": "https://exemplo.com/webhooks/routa"
+          },
+          "subscribed_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tipos de evento assinados, incluindo curingas como `message.*`."
+          },
+          "api_version": {
+            "type": "string",
+            "description": "Versão da API fixada na criação do endpoint."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled_by_user",
+              "disabled_by_system"
+            ],
+            "description": "Estado do endpoint: `enabled`, `disabled_by_user` ou `disabled_by_system`."
+          },
+          "consecutive_failures": {
+            "type": "number",
+            "description": "Falhas consecutivas de entrega. Zera a cada sucesso."
+          },
+          "last_success_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Último sucesso de entrega, ou `null`."
+          },
+          "last_failure_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Última falha de entrega, ou `null`."
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando o endpoint foi criado.",
+            "example": "2026-09-04T13:22:41.031Z"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "subscribed_types",
+          "api_version",
+          "status",
+          "consecutive_failures",
+          "last_success_at",
+          "last_failure_at",
+          "created_at"
+        ]
+      },
+      "WebhookEndpointWithSecret": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador do endpoint.",
+            "example": "whe_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL que recebe os eventos.",
+            "example": "https://exemplo.com/webhooks/routa"
+          },
+          "subscribed_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tipos de evento assinados, incluindo curingas como `message.*`."
+          },
+          "api_version": {
+            "type": "string",
+            "description": "Versão da API fixada na criação do endpoint."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled_by_user",
+              "disabled_by_system"
+            ],
+            "description": "Estado do endpoint: `enabled`, `disabled_by_user` ou `disabled_by_system`."
+          },
+          "consecutive_failures": {
+            "type": "number",
+            "description": "Falhas consecutivas de entrega. Zera a cada sucesso."
+          },
+          "last_success_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Último sucesso de entrega, ou `null`."
+          },
+          "last_failure_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Última falha de entrega, ou `null`."
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando o endpoint foi criado.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "secret": {
+            "type": "string",
+            "description": "Segredo de assinatura. Exibido apenas na criação e na rotação. Guarde-o com segurança.",
+            "example": "whsec_..."
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "subscribed_types",
+          "api_version",
+          "status",
+          "consecutive_failures",
+          "last_success_at",
+          "last_failure_at",
+          "created_at",
+          "secret"
+        ]
+      },
+      "WebhookEndpointList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookEndpoint"
+            },
+            "description": "Endpoints do projeto."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Indica se existem mais páginas. Hoje é sempre `false`."
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Sempre `null`. A listagem retorna todos os endpoints de uma vez."
+          }
+        },
+        "required": [
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "required": [
+          "id",
+          "event_id",
+          "event_type",
+          "state",
+          "attempt_count",
+          "next_attempt_at",
+          "last_response_status",
+          "last_error_code",
+          "succeeded_at",
+          "exhausted_at",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador da entrega.",
+            "example": "whd_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "event_id": {
+            "type": "string",
+            "description": "Evento entregue.",
+            "example": "evt_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "event_type": {
+            "type": "string",
+            "description": "Tipo do evento entregue.",
+            "example": "message.delivered"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in_flight",
+              "retrying",
+              "succeeded",
+              "exhausted"
+            ],
+            "description": "Estado da entrega: `pending`, `in_flight`, `retrying`, `succeeded` ou `exhausted`."
+          },
+          "attempt_count": {
+            "type": "number",
+            "description": "Tentativas realizadas."
+          },
+          "next_attempt_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando ocorre a próxima tentativa."
+          },
+          "last_response_status": {
+            "type": "number",
+            "nullable": true,
+            "description": "Status HTTP da última resposta do seu servidor, ou `null`."
+          },
+          "last_error_code": {
+            "type": "string",
+            "nullable": true,
+            "description": "Código do último erro, como timeout ou falha de conexão, ou `null`."
+          },
+          "succeeded_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando a entrega teve sucesso, ou `null`."
+          },
+          "exhausted_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando esgotou as tentativas, ou `null`."
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando a entrega foi criada.",
+            "example": "2026-09-04T13:22:41.031Z"
+          }
+        }
+      },
+      "WebhookDeliveryList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            },
+            "description": "Entregas da página."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Indica se existem mais páginas."
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Cursor da próxima página, ou `null` na última."
+          }
+        },
+        "required": [
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "ReplayResult": {
+        "type": "object",
+        "properties": {
+          "replayed_count": {
+            "type": "number",
+            "description": "Quantidade de entregas reenviadas.",
+            "example": 12
+          }
+        },
+        "required": [
+          "replayed_count"
+        ]
+      },
+      "Media": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador da mídia.",
+            "example": "med_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "content_type": {
+            "type": "string",
+            "description": "Tipo MIME do arquivo.",
+            "example": "image/jpeg"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "unavailable"
+            ],
+            "description": "Estado: `pending`, `ready` ou `unavailable`."
+          },
+          "url": {
+            "type": "string",
+            "nullable": true,
+            "description": "URL assinada com validade de 15 minutos. Presente apenas quando `status` é `ready`."
+          }
+        },
+        "required": [
+          "id",
+          "content_type",
+          "status",
+          "url"
+        ]
+      },
+      "TemplateMedia": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador da mídia de cabeçalho. Use-o em `components.header.media_id`.",
+            "example": "tmedia_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video",
+              "document"
+            ],
+            "description": "Formato: `image`, `video` ou `document`."
+          },
+          "size_bytes": {
+            "type": "number",
+            "description": "Tamanho do arquivo, em bytes."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "Tipo MIME do arquivo.",
+            "example": "image/png"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando o arquivo foi enviado.",
+            "example": "2026-09-04T13:22:41.031Z"
+          }
+        },
+        "required": [
+          "id",
+          "format",
+          "size_bytes",
+          "content_type",
+          "created_at"
+        ]
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "from_date": {
+            "description": "Início do período (inclusivo).",
+            "type": "string",
+            "example": "2026-09-01"
+          },
+          "to_date": {
+            "description": "Fim do período (exclusivo).",
+            "type": "string",
+            "example": "2026-10-01"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "metric",
+                "channel_type",
+                "provider",
+                "quantity",
+                "unit"
+              ],
+              "properties": {
+                "metric": {
+                  "type": "string",
+                  "description": "Métrica medida.",
+                  "example": "message.sent"
+                },
+                "channel_type": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Tipo do canal, ou `null`.",
+                  "example": "whatsapp"
+                },
+                "provider": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Provedor, ou `null`.",
+                  "example": "whatsapp_cloud"
+                },
+                "quantity": {
+                  "type": "number",
+                  "description": "Quantidade no período.",
+                  "example": 1840
+                },
+                "unit": {
+                  "type": "string",
+                  "description": "Unidade da métrica.",
+                  "example": "message"
+                }
+              }
+            },
+            "description": "Uma linha por combinação de métrica, tipo de canal e provedor."
+          }
+        },
+        "required": [
+          "from_date",
+          "to_date",
+          "data"
+        ]
+      },
+      "Whoami": {
+        "type": "object",
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "description": "Organização dona da chave.",
+            "example": "org_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Projeto ao qual a chave pertence.",
+            "example": "proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "api_key_id": {
+            "type": "string",
+            "description": "Identificador da chave.",
+            "example": "key_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "messages:read",
+                "messages:write",
+                "channels:read",
+                "channels:write",
+                "events:read",
+                "webhooks:write",
+                "usage:read",
+                "templates:read",
+                "templates:write",
+                "media:read",
+                "media:write"
+              ]
+            },
+            "description": "Escopos concedidos à chave."
+          }
+        },
+        "required": [
+          "organization_id",
+          "project_id",
+          "api_key_id",
+          "scopes"
+        ]
+      }
+    }
+  }
+}
