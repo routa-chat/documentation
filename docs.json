@@ -157,7 +157,8 @@
           {
             "group": "Comece aqui",
             "pages": [
-              "sdk/overview"
+              "sdk/overview",
+              "sdk/configuration"
             ]
           }
         ]

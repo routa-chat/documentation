@@ -1,0 +1,92 @@
+---
+title: "Configuração"
+description: "Opções do cliente Routa: timeout, retentativas, baseURL, logger e fetch, além do comportamento de idempotência."
+---
+
+O construtor `Routa` valida a configuração de forma síncrona e monta o transporte que todos os recursos usam.
+
+```ts
+import { Routa } from '@routa-chat/sdk'
+
+const routa = new Routa({
+  apiKey: process.env['ROUTA_API_KEY']!,
+  timeout: 10_000, // ms por tentativa
+  maxRetries: 2, // retentativas depois da primeira tentativa
+})
+```
+
+## Opções
+
+| Opção | Padrão | Descrição |
+| --- | --- | --- |
+| `apiKey` | obrigatório | Credencial `Bearer`. |
+| `baseURL` | API de produção da Routa | Origem das requisições. Use para apontar o cliente a outro host, como homologação ou uma instância local: `baseURL: 'http://localhost:3000'`. |
+| `timeout` | `30000` | Timeout de cada tentativa, em milissegundos. |
+| `maxRetries` | `3` | Retentativas depois da primeira tentativa. `0` desativa as retentativas. |
+| `logger` | no-op | Objeto com os métodos `debug`, `warn` e `error`. Recebe diagnósticos de requisição, como retentativas. Nunca recebe a chave de API nem corpos de requisição e resposta, e o SDK nunca escreve no `console` por conta própria. |
+| `fetch` | `fetch` global | Substitui o `fetch` usado em toda requisição, por exemplo para injetar um agente de proxy ou um *test double*. |
+
+## Retentativas
+
+O cliente retenta:
+
+- falhas de rede e timeouts;
+- respostas `429`;
+- respostas `5xx`;
+- um `409` que significa "uma requisição idêntica ainda está em andamento" (`idempotency_in_progress`).
+
+A espera usa *backoff* exponencial com jitter completo, limitado a 8 segundos, e respeita o header `Retry-After` quando o servidor o envia. Respostas `4xx` como `401`, `403`, `404` e `422` **nunca** são retentadas, porque repeti-las só repetiria a mesma falha. Um `409 idempotency_key_reuse` também não é retentado: é um erro do cliente.
+
+## Idempotência
+
+`messages.send()` envia um `Idempotency-Key` automaticamente e o **reutiliza em todas as retentativas**, então uma retentativa nunca cria uma segunda mensagem. Passe a sua própria chave com `send({ ..., idempotencyKey })`.
+
+```ts
+await routa.messages.send({
+  channel: 'chan_...',
+  to: '+5581999999999',
+  text: 'Olá!',
+  idempotencyKey: 'pedido-1234-confirmacao',
+})
+```
+
+Quando uma chamada devolve o resultado de uma tentativa anterior, `message._replayed` é `true`.
+
+<Warning>
+  O servidor deduplica apenas `messages.send()`. Se você precisa evitar retentativas nas outras operações de escrita, configure `maxRetries: 0`. Veja [Idempotência](/reliability/idempotency).
+</Warning>
+
+## Logger
+
+```ts
+const routa = new Routa({
+  apiKey: process.env['ROUTA_API_KEY']!,
+  logger: {
+    debug: (message, context) => console.debug(message, context),
+    warn: (message, context) => console.warn(message, context),
+    error: (message, context) => console.error(message, context),
+  },
+})
+```
+
+## Fetch personalizado
+
+Substitua o `fetch` para injetar um agente de proxy ou, em testes, para responder sem rede:
+
+```ts
+const routa = new Routa({
+  apiKey: 'rt_test_...',
+  fetch: async () =>
+    new Response(
+      JSON.stringify({
+        organization_id: 'org_01J8ZK9M3Q7XABCDEFGHJKMNPQ',
+        project_id: 'proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ',
+        api_key_id: 'key_01J8ZK9M3Q7XABCDEFGHJKMNPQ',
+        scopes: ['messages:write'],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    ),
+})
+
+await routa.whoami() // não faz chamada de rede
+```
