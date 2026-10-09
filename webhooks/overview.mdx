@@ -1,0 +1,142 @@
+---
+title: "Visão geral dos webhooks"
+description: "Receba eventos normalizados da Routa no seu servidor HTTPS: como registrar um endpoint, o formato das entregas e os limites."
+---
+
+Webhooks entregam eventos da Routa ao seu servidor assim que eles acontecem. É a forma recomendada de acompanhar [a entrega de mensagens](/guides/track-delivery) e de receber [mensagens de clientes](/guides/receive-messages).
+
+A Routa entrega **eventos normalizados** (`message.delivered`, `message.received`…), nunca payloads do provedor. Você escreve uma integração só, independente do canal.
+
+<Note>
+  Escopo necessário para gerenciar endpoints: `webhooks:write`.
+</Note>
+
+## Como funciona
+
+<Steps>
+  <Step title="Registre um endpoint">
+    Informe a URL HTTPS e os tipos de evento que você quer receber.
+  </Step>
+  <Step title="Guarde o segredo">
+    A resposta traz o `secret` de assinatura. Ele é exibido **uma única vez**.
+  </Step>
+  <Step title="Verifique cada entrega">
+    Valide o header `Routa-Signature` sobre o corpo bruto antes de confiar no evento. Veja [Assinaturas](/webhooks/signatures).
+  </Step>
+  <Step title="Responda 2xx">
+    Retorne um status `2xx` em até 10 segundos. Qualquer outra resposta é tratada como falha e retentada.
+  </Step>
+</Steps>
+
+## Registrar um endpoint
+
+<CodeGroup>
+```bash cURL
+curl https://api.routa.chat/v1/webhook_endpoints \
+  -H "Authorization: Bearer $ROUTA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://exemplo.com/webhooks/routa",
+    "subscribed_types": ["message.*", "channel.status_changed"]
+  }'
+```
+
+```ts Node.js
+const webhook = await routa.webhooks.create({
+  url: 'https://exemplo.com/webhooks/routa',
+  subscribedTypes: ['message.*', 'channel.status_changed'],
+})
+
+console.log(webhook.id, webhook.secret) // guarde o secret com segurança
+```
+</CodeGroup>
+
+```json Resposta (201 Created)
+{
+  "id": "whe_01J8...",
+  "url": "https://exemplo.com/webhooks/routa",
+  "subscribed_types": ["message.*", "channel.status_changed"],
+  "api_version": "v1",
+  "status": "enabled",
+  "consecutive_failures": 0,
+  "last_success_at": null,
+  "last_failure_at": null,
+  "created_at": "2026-09-04T13:00:00.000Z",
+  "secret": "whsec_..."
+}
+```
+
+### Tipos assinados
+
+`subscribed_types` precisa ter pelo menos um item. Cada item é um tipo de evento exato (por exemplo `message.delivered`) ou um curinga por recurso: `message.*`, `channel.*` ou `template.*`. Um curinga solto (`*`) ou um tipo inexistente retorna `422 invalid_subscribed_types`. A lista completa está em [Tipos de evento](/webhooks/event-types).
+
+Para alterar a assinatura depois, use `PATCH /v1/webhook_endpoints/{id}`.
+
+### Requisitos da URL
+
+- Em produção, a URL deve usar **HTTPS**.
+- Endereços privados, de loopback e *link-local* são rejeitados (`invalid_webhook_url`). A Routa também reverifica o DNS no momento de cada entrega, e não segue redirecionamentos.
+- `http://localhost` é aceito somente em [projetos de teste](/environments).
+- Cada projeto pode ter até **5 endpoints**. Acima disso, a criação retorna `422 too_many_webhook_endpoints`.
+
+## O que a Routa envia
+
+Cada entrega é um `POST` com um único evento no corpo e estes headers:
+
+```http
+POST /webhooks/routa HTTP/1.1
+Content-Type: application/json
+Routa-Event-Id: evt_01J8...
+Routa-Event-Type: message.delivered
+Routa-Delivery-Id: whd_01J8...
+Routa-Delivery-Attempt: 3
+Routa-Signature: t=1757000000,v1=9f86d081...
+User-Agent: Routa-Webhooks/1.0
+```
+
+| Header | Descrição |
+| --- | --- |
+| `Routa-Event-Id` | Id do evento. Use para deduplicar. |
+| `Routa-Event-Type` | Tipo do evento. |
+| `Routa-Delivery-Id` | Id desta entrega (um evento para um endpoint). |
+| `Routa-Delivery-Attempt` | Número da tentativa, a partir de 1. |
+| `Routa-Signature` | Assinatura HMAC com timestamp. |
+
+O corpo é o [objeto evento](/concepts/events). Não há envio em lote: **um evento por requisição**.
+
+## Semântica de entrega
+
+- **Pelo menos uma vez.** O mesmo evento pode chegar mais de uma vez. Deduplique por `id`.
+- **Sem ordem global.** Eventos podem chegar fora de ordem. Trate o status como monotônico.
+- **Sucesso** é qualquer `2xx` em até 10 segundos. O corpo da resposta é ignorado.
+- Falhas são retentadas com espera crescente por cerca de 20 horas. Veja [Retentativas e reenvio](/webhooks/retries-and-replay).
+
+## Boas práticas
+
+<CardGroup cols={2}>
+  <Card title="Responda rápido" icon="bolt">
+    Valide, grave o evento em uma fila e retorne `200`. Processe depois.
+  </Card>
+  <Card title="Verifique a assinatura" icon="shield-check">
+    Nunca confie em um evento sem validar `Routa-Signature` sobre o corpo bruto.
+  </Card>
+  <Card title="Deduplique" icon="clone">
+    Guarde o `id` dos eventos já processados por pelo menos 24 horas.
+  </Card>
+  <Card title="Tolere o desconhecido" icon="circle-question">
+    Ignore tipos e campos novos. A Routa só faz mudanças aditivas na `v1`.
+  </Card>
+</CardGroup>
+
+## Gerenciar endpoints
+
+| Ação | Endpoint |
+| --- | --- |
+| Criar | [`POST /v1/webhook_endpoints`](/api-reference/endpoint/webhooks/create) |
+| Listar | [`GET /v1/webhook_endpoints`](/api-reference/endpoint/webhooks/list) |
+| Consultar | [`GET /v1/webhook_endpoints/{id}`](/api-reference/endpoint/webhooks/retrieve) |
+| Alterar tipos | [`PATCH /v1/webhook_endpoints/{id}`](/api-reference/endpoint/webhooks/update) |
+| Rotacionar o segredo | [`POST /v1/webhook_endpoints/{id}/rotate_secret`](/api-reference/endpoint/webhooks/rotate-secret) |
+| Desativar | [`POST /v1/webhook_endpoints/{id}/disable`](/api-reference/endpoint/webhooks/disable) |
+| Reativar | [`POST /v1/webhook_endpoints/{id}/enable`](/api-reference/endpoint/webhooks/enable) |
+| Ver entregas | [`GET /v1/webhook_endpoints/{id}/deliveries`](/api-reference/endpoint/webhooks/list-deliveries) |

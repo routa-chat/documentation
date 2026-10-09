@@ -46,6 +46,12 @@
               "guides/receive-messages",
               "guides/track-delivery"
             ]
+          },
+          {
+            "group": "Webhooks",
+            "pages": [
+              "webhooks/overview"
+            ]
           }
         ]
       }
