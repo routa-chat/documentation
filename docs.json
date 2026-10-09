@@ -160,6 +160,12 @@
               "sdk/overview",
               "sdk/configuration"
             ]
+          },
+          {
+            "group": "Recursos",
+            "pages": [
+              "sdk/messages"
+            ]
           }
         ]
       }

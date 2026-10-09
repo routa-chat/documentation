@@ -1,0 +1,115 @@
+---
+title: "Mensagens"
+description: "Envie, consulte, liste e marque mensagens como lidas com routa.messages."
+---
+
+`routa.messages` cobre o ciclo de vida das mensagens. Cada método corresponde a um endpoint da [API REST](/api-reference/endpoint/messages/send).
+
+## `send`
+
+Envia texto ou um template aprovado. Retorna a mensagem no estado `accepted`.
+
+```ts
+const message = await routa.messages.send({
+  channel: 'chan_...',
+  to: '+5581999999999',
+  text: 'Olá! Seu pedido foi confirmado.',
+  metadata: { order_id: '1234' },
+})
+
+console.log(message.id, message.status) // "msg_...", "accepted"
+```
+
+| Parâmetro | Descrição |
+| --- | --- |
+| `channel` | Id do canal (`chan_...`). |
+| `to` | Destinatário em E.164. O `+` inicial é opcional. |
+| `text` | Corpo da mensagem. Mutuamente exclusivo com `template`. |
+| `template` | `{ id, bodyParameters? }`. Mutuamente exclusivo com `text`. |
+| `metadata` | Até 20 pares chave-valor de texto. |
+| `idempotencyKey` | Reutilizada em toda retentativa. Por padrão o SDK gera uma. |
+
+Enviar um template:
+
+```ts
+await routa.messages.send({
+  channel: 'chan_...',
+  to: '+5581999999999',
+  template: { id: 'tmpl_...', bodyParameters: ['Ana', '#1234'] },
+})
+```
+
+<Warning>
+  `accepted` não significa entregue. Acompanhe a entrega por [webhooks](/sdk/webhooks). Veja [Acompanhar a entrega](/guides/track-delivery).
+</Warning>
+
+## `retrieve`
+
+Retorna uma mensagem pelo id.
+
+```ts
+import { isMessageId, toMessageId } from '@routa-chat/sdk'
+
+// Um id que você já considera confiável, como um guardado de um envio anterior:
+const message = await routa.messages.retrieve(toMessageId('msg_01J8ZK9M3Q7XABCDEFGHJKMNPQ'))
+console.log(message.status, message.deliveredAt)
+
+// Um id vindo de uma entrada do usuário ou de uma URL: valide o formato antes.
+function lookUp(id: string) {
+  if (!isMessageId(id)) {
+    throw new Error(`Not a message id: ${id}`)
+  }
+  return routa.messages.retrieve(id)
+}
+```
+
+Os ids são tipos *branded*: um `MessageId` é uma string em runtime, mas uma `string` comum não é atribuível a ele. Veja [Tipos e IDs](/sdk/typescript).
+
+## `list`
+
+Lista mensagens com paginação automática. Filtre por `direction` para ver só as recebidas ou só as enviadas.
+
+```ts
+for await (const message of routa.messages.list({ direction: 'inbound', limit: 50 })) {
+  console.log(message.id, message.from, message.content)
+}
+```
+
+Para controlar a paginação manualmente, peça uma página por vez:
+
+```ts
+const page = await routa.messages.list({ limit: 20 }).page()
+console.log(page.data.length, page.hasMore, page.nextCursor)
+```
+
+Veja [Paginação](/sdk/pagination).
+
+## `markRead`
+
+Marca uma mensagem **recebida** como lida e envia a confirmação de leitura ao remetente.
+
+```ts
+const message = await routa.messages.markRead(messageId)
+console.log(message.status) // "read"
+```
+
+Para uma mensagem enviada por você, a API responde `422 message_direction_invalid`.
+
+## O objeto `Message`
+
+Os campos do SDK são os da API em *camelCase*.
+
+| Campo | Tipo | Descrição |
+| --- | --- | --- |
+| `id` | `MessageId` | Identificador. |
+| `channel` | `string` | Canal usado. |
+| `direction` | `'outbound' \| 'inbound'` | Direção. |
+| `from`, `to` | `string` | Endereços em E.164. |
+| `content` | `MessageContent` | Conteúdo, discriminado por `type`. |
+| `status` | `MessageStatus` | `accepted`, `sent`, `delivered`, `read` ou `failed`. |
+| `metadata` | `Record<string, string>` | Metadados do cliente. |
+| `acceptedAt` | `string` | ISO 8601, sempre presente. |
+| `sentAt`, `deliveredAt`, `readAt`, `failedAt` | `string \| null` | Momento de cada etapa. |
+| `_replayed` | `boolean` | `true` quando a chamada devolveu o resultado de uma tentativa anterior com a mesma `Idempotency-Key`. |
+
+`MessageContent` cobre também tipos que só chegam em mensagens recebidas ou no histórico (mídia, localização, reação) e `unsupported`, para que ler uma mensagem nunca lance erro só porque o tipo ainda não é enviável.
