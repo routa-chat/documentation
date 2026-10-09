@@ -1,0 +1,109 @@
+---
+title: "Mensagens e ciclo de vida"
+description: "O objeto mensagem, os tipos de conteúdo e como o status evolui de accepted até read ou failed."
+---
+
+Uma mensagem representa uma comunicação em qualquer direção: `outbound` (enviada por você) ou `inbound` (recebida de um cliente). Ela é independente do provedor: o mesmo objeto serve para qualquer canal presente ou futuro.
+
+## O objeto mensagem
+
+```json
+{
+  "id": "msg_01J8ZK9M3Q7X...",
+  "channel": "chan_01J8...",
+  "direction": "outbound",
+  "from": "+5581988888888",
+  "to": "+5581999999999",
+  "content": { "type": "text", "body": "Olá! Seu pedido foi confirmado." },
+  "status": "delivered",
+  "metadata": { "order_id": "1234" },
+  "accepted_at": "2026-09-04T13:22:40.812Z",
+  "sent_at": "2026-09-04T13:22:41.031Z",
+  "delivered_at": "2026-09-04T13:22:42.402Z",
+  "read_at": null,
+  "failed_at": null
+}
+```
+
+| Campo | Descrição |
+| --- | --- |
+| `id` | Identificador da mensagem (`msg_...`). |
+| `channel` | Canal usado (`chan_...`). |
+| `direction` | `outbound` ou `inbound`. |
+| `from`, `to` | Endereços no formato E.164. |
+| `content` | Conteúdo, um objeto com `type`. Veja a tabela de tipos de conteúdo abaixo. |
+| `status` | Estado atual no ciclo de vida. |
+| `metadata` | Até 20 pares chave-valor de texto, de propriedade do cliente. Total de até 1 KB. |
+| `accepted_at` | Quando a Routa aceitou a mensagem. Sempre presente. |
+| `sent_at`, `delivered_at`, `read_at`, `failed_at` | Momento de cada transição, ou `null` se ela não ocorreu. |
+
+Use `metadata` para ligar a mensagem ao seu domínio, por exemplo o ID do pedido. Ele é devolvido na consulta e nos eventos.
+
+## Ciclo de vida
+
+```text
+accepted ──► sent ──► delivered ──► read
+    │          │
+    └──────────┴──► failed        (terminal)
+```
+
+| Status | Significado |
+| --- | --- |
+| `accepted` | A Routa gravou a mensagem de forma durável. Ela ainda não foi entregue ao provedor. |
+| `sent` | O provedor aceitou a mensagem. |
+| `delivered` | O provedor confirmou a entrega ao aparelho do destinatário. |
+| `read` | O destinatário leu a mensagem (quando o canal oferece confirmação de leitura). |
+| `failed` | Falha terminal. |
+
+<Warning>
+  `202 Accepted` na criação significa apenas `accepted`. A entrega acontece depois, de forma assíncrona. Só trate a mensagem como entregue ao receber `delivered`.
+</Warning>
+
+### O status nunca retrocede
+
+Provedores entregam atualizações de status fora de ordem e mais de uma vez. A Routa só aplica uma transição que avança no ciclo, então uma mensagem nunca volta de `read` para `sent` porque um aviso antigo chegou atrasado. Você pode escrever `if (message.status === 'delivered')` sem lógica defensiva de ordenação.
+
+`failed` só é aceito enquanto a mensagem ainda não foi entregue (`accepted` ou `sent`).
+
+### Retentativas não são um status
+
+Se o provedor falha de forma transitória, a Routa tenta de novo sozinha, com espera crescente. Enquanto isso a mensagem permanece `accepted`. Não existe status `queued` nem `retrying` na API pública. Se as tentativas se esgotam, a mensagem vira `failed`. O motivo aparece na linha do tempo da mensagem no painel.
+
+## Mensagens recebidas
+
+Uma mensagem inbound nasce com `direction: "inbound"` e `status: "delivered"`, e gera o evento `message.received`. Para sinalizar ao remetente que você leu, use `POST /v1/messages/{id}/read`, que leva a mensagem para `read`.
+
+Conteúdo que a Routa ainda não sabe modelar chega como `{ "type": "unsupported" }`. A mensagem nunca é descartada por ser desconhecida.
+
+## Tipos de conteúdo
+
+O campo `content` é um objeto discriminado por `type`.
+
+| `type` | Campos | Observações |
+| --- | --- | --- |
+| `text` | `body` | Mensagem de texto. |
+| `template` | `template_id`, `body_parameters` | Template aprovado. Veja [Templates](/concepts/templates). |
+| `image` | `media_id`, `caption?` | Imagem. |
+| `document` | `media_id`, `filename?`, `caption?` | Documento. |
+| `audio` | `media_id` | Áudio. |
+| `video` | `media_id`, `caption?` | Vídeo. |
+| `sticker` | `media_id` | Figurinha. |
+| `location` | `latitude`, `longitude`, `name?`, `address?` | Localização. |
+| `reaction` | `target_message_id`, `emoji` | Reação a outra mensagem. |
+| `unsupported` | n/d | Conteúdo recebido que a Routa ainda não modela. |
+
+<Info>
+  Hoje `POST /v1/messages` envia apenas `text` e `template`. Os demais tipos aparecem em mensagens recebidas e no histórico, e você pode lê-los normalmente. Para baixar a mídia de uma mensagem, use o `media_id` em [`GET /v1/media/{id}`](/api-reference/endpoint/media/retrieve).
+</Info>
+
+## Validação no aceite
+
+A Routa valida a mensagem **no momento do aceite**, não no despacho. Isso transforma problemas previsíveis em um erro imediato `422`, em vez de um `message.failed` segundos depois:
+
+- O canal precisa estar `active` (`channel_inactive`).
+- O canal precisa suportar o tipo de conteúdo (`capability_unsupported`).
+- O destinatário precisa ser um número válido (`invalid_recipient`).
+- Um template precisa estar aprovado e com o número certo de parâmetros (`template_not_approved`, `template_paused`, `content_rejected`).
+- Informe exatamente um entre `text` e `template` (`content_rejected`).
+
+Veja todos os códigos em [Códigos de erro](/errors/error-codes).
