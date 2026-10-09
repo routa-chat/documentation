@@ -105,6 +105,15 @@
             "pages": [
               "api-reference/endpoint/events/list"
             ]
+          },
+          {
+            "group": "Webhooks",
+            "pages": [
+              "api-reference/endpoint/webhooks/create",
+              "api-reference/endpoint/webhooks/list",
+              "api-reference/endpoint/webhooks/retrieve",
+              "api-reference/endpoint/webhooks/update"
+            ]
           }
         ]
       }
