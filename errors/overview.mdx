@@ -1,0 +1,124 @@
+---
+title: "Erros"
+description: "O formato dos erros da API, os tipos de erro e como decidir entre corrigir a requisição, tentar de novo ou escalar."
+---
+
+A API usa códigos de status HTTP convencionais. Respostas `2xx` indicam sucesso, `4xx` indicam um problema na requisição e `5xx` indicam um problema do lado da Routa.
+
+## Formato do erro
+
+Todo erro de negócio tem a mesma estrutura, no estilo de APIs de pagamento que você provavelmente já conhece:
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "channel_inactive",
+    "message": "Channel chan_01J8... is not active and cannot send messages.",
+    "param": "channel",
+    "request_id": "req_01J8..."
+  }
+}
+```
+
+| Campo | Descrição |
+| --- | --- |
+| `type` | A categoria do erro. Veja a tabela abaixo. |
+| `code` | Identificador **estável** e legível por máquina. Use-o na sua lógica. |
+| `message` | Texto para humanos, em inglês. Pode mudar: **não** faça parse dele. |
+| `param` | O campo da requisição com problema, quando se aplica. |
+| `doc_url` | Link para a documentação do código. Presente apenas em alguns erros. |
+| `details` | Objeto opcional com valores numéricos ou textuais acionáveis (veja abaixo). |
+| `request_id` | Identificador da requisição (`req_...`). Informe-o ao falar com o suporte. |
+
+<Info>
+  O `code` faz parte do contrato: ele nunca é renomeado. Novos códigos podem ser adicionados a qualquer momento, então trate códigos desconhecidos de forma genérica, usando o `type` e o status HTTP.
+</Info>
+
+O mesmo `request_id` também vem no header `Routa-Request-Id` de **toda** resposta.
+
+### Detalhes acionáveis
+
+Alguns erros trazem `details` com valores que você pode usar programaticamente:
+
+| Código | Campos em `details` |
+| --- | --- |
+| `message_quota_exceeded` | `limit` (franquia do período), `used` (usado) e `resets_at` (quando a franquia renova, ISO 8601). |
+| `project_limit_exceeded`, `channel_limit_exceeded` | `limit`. |
+| `insufficient_permission` | `permission` (a capacidade exigida). |
+
+## Tipos de erro
+
+| `type` | Status | Significado |
+| --- | --- | --- |
+| `invalid_request_error` | `411`, `413`, `422` | A requisição é inválida. Corrija antes de tentar de novo. |
+| `authentication_error` | `401` | Chave ausente, inválida, revogada ou expirada. |
+| `permission_error` | `403` | A chave é válida, mas não tem o escopo necessário. |
+| `not_found_error` | `404` | O recurso não existe **ou** pertence a outro projeto. |
+| `conflict_error` | `409` | Conflito de idempotência ou de estado. |
+| `billing_error` | `402` | Um limite do plano impede a operação. |
+| `rate_limit_error` | `429` | Limite de taxa. Aguarde `Retry-After`. |
+| `api_error` | `5xx` | Problema do lado da Routa. Pode tentar de novo. |
+
+<Note>
+  `billing_error` usa `402`, nunca `429`. Clientes retentam `429`, mas esperar não aumenta a franquia de um plano.
+</Note>
+
+## Status HTTP
+
+| Status | Quando |
+| --- | --- |
+| `200` | Leitura ou ação concluída. |
+| `201` | Recurso criado (webhooks, templates, mídia). |
+| `202` | `POST /v1/messages`: aceito, o envio é assíncrono. |
+| `401` | Chave de API ausente ou inválida. |
+| `402` | Franquia ou limite do plano esgotado. |
+| `403` | Escopo insuficiente. |
+| `404` | Recurso inexistente ou de outro projeto. |
+| `409` | Conflito de idempotência ou de estado. |
+| `411` | `Content-Length` obrigatório em uploads que não usam chunked. |
+| `413` | Corpo maior que o limite da rota. |
+| `422` | Requisição bem formada, mas semanticamente inválida. |
+| `429` | Limite de taxa. |
+| `503` | A Routa não consegue processar agora. Tente de novo. |
+
+## Erros de validação de schema
+
+Quando o corpo ou os parâmetros não respeitam o schema da rota (por exemplo, falta um campo obrigatório), a API responde `422` com um objeto de validação, e não com o envelope `error`:
+
+```json
+{
+  "type": "validation",
+  "on": "body",
+  "property": "/channel",
+  "message": "Expected string",
+  "summary": "Expected property 'channel' to be string but found: undefined"
+}
+```
+
+Trate todo `422` assim: se existir `error.code`, use-o. Caso contrário, é um erro de validação do schema, e `property` aponta o campo.
+
+## Como tratar cada erro
+
+<AccordionGroup>
+  <Accordion title="4xx (exceto 409 e 429): corrija a requisição">
+    Não adianta tentar de novo sem mudar nada. Leia `code`, `param` e `message`, corrija e envie outra requisição. A exceção são os `409 idempotency_in_progress`, que valem uma nova tentativa.
+  </Accordion>
+  <Accordion title="429: espere e tente de novo">
+    Respeite o header `Retry-After` e use espera exponencial com jitter. Veja [Limites de taxa](/reliability/rate-limits).
+  </Accordion>
+  <Accordion title="5xx: tente de novo com a mesma idempotency key">
+    Falhas do lado da Routa são seguras de repetir **se você usa `Idempotency-Key`**. Reenvie com a mesma chave. Veja [Idempotência](/reliability/idempotency).
+  </Accordion>
+  <Accordion title="Falha de rede ou timeout">
+    Você não sabe se a requisição chegou. Reenvie com a mesma `Idempotency-Key`. Ela garante que não haja mensagem duplicada.
+  </Accordion>
+</AccordionGroup>
+
+## Erros no SDK
+
+O SDK converte as respostas de erro em classes tipadas. Veja [Tratamento de erros](/sdk/error-handling).
+
+## Catálogo de códigos
+
+Veja todos os códigos, com causa e solução, em [Códigos de erro](/errors/error-codes).

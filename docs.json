@@ -65,6 +65,12 @@
               "reliability/pagination",
               "reliability/delivery-guarantees"
             ]
+          },
+          {
+            "group": "Erros",
+            "pages": [
+              "errors/overview"
+            ]
           }
         ]
       }
