@@ -61,7 +61,8 @@
             "group": "Confiabilidade",
             "pages": [
               "reliability/idempotency",
-              "reliability/rate-limits"
+              "reliability/rate-limits",
+              "reliability/pagination"
             ]
           }
         ]

@@ -1,0 +1,74 @@
+---
+title: "Paginação"
+description: "Percorra listas grandes com paginação por cursor: parâmetros, formato da resposta e iteração no SDK."
+---
+
+Os endpoints de lista usam **paginação por cursor** (*keyset*). Não existe paginação por `page` e `offset`: em tabelas que só crescem, isso ficaria mais lento e inconsistente a cada página.
+
+## Parâmetros
+
+| Parâmetro | Descrição |
+| --- | --- |
+| `limit` | Itens por página, de 1 a 100. |
+| `cursor` | Valor de `next_cursor` da página anterior. |
+| `after` | Somente em `GET /v1/events`: o `id` do último evento processado. |
+
+## Formato da resposta
+
+```json
+{
+  "data": [
+    { "id": "msg_01J8...", "status": "delivered" }
+  ],
+  "has_more": true,
+  "next_cursor": "eyJ..."
+}
+```
+
+| Campo | Descrição |
+| --- | --- |
+| `data` | Itens da página. |
+| `has_more` | `true` se existem mais páginas. |
+| `next_cursor` | Cursor da próxima página, ou `null` na última. |
+
+Trate o `next_cursor` como um valor **opaco**: não o decodifique nem o construa. Um cursor inválido retorna `422 invalid_cursor`.
+
+<Note>
+  Em `GET /v1/events` o cursor é o próprio id do evento, passado em `after`. Veja [Reconciliar eventos](/webhooks/reconciliation).
+</Note>
+
+## Percorrendo todas as páginas
+
+<CodeGroup>
+```bash cURL
+# Primeira página
+curl "https://api.routa.chat/v1/messages?limit=50" \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+
+# Próxima página
+curl "https://api.routa.chat/v1/messages?limit=50&cursor=eyJ..." \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+```ts Node.js
+// O iterador assíncrono busca as páginas seguintes para você.
+for await (const message of routa.messages.list({ direction: 'inbound', limit: 50 })) {
+  console.log(message.id, message.from, message.content)
+}
+
+// Para controlar a paginação manualmente, peça uma página por vez:
+const page = await routa.messages.list({ limit: 20 }).page()
+console.log(page.data.length, page.hasMore, page.nextCursor)
+```
+</CodeGroup>
+
+## Endpoints paginados
+
+| Endpoint | Filtros |
+| --- | --- |
+| [`GET /v1/messages`](/api-reference/endpoint/messages/list) | `direction` |
+| [`GET /v1/events`](/api-reference/endpoint/events/list) | `type`, `after` |
+| [`GET /v1/templates`](/api-reference/endpoint/templates/list) | `channel` |
+| [`GET /v1/webhook_endpoints/{id}/deliveries`](/api-reference/endpoint/webhooks/list-deliveries) | `state` |
+
+`GET /v1/webhook_endpoints` também usa o envelope `{ data, has_more, next_cursor }`, mas retorna todos os endpoints de uma vez (no máximo 5 por projeto).
