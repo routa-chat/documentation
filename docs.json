@@ -81,6 +81,17 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Referência da API",
+        "groups": [
+          {
+            "group": "Introdução",
+            "pages": [
+              "api-reference/introduction"
+            ]
+          }
+        ]
       }
     ]
   },

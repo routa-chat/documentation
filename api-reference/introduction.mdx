@@ -1,0 +1,214 @@
+---
+title: "Referência da API"
+description: "URL base, autenticação, formato de resposta, paginação, idempotência, limites e convenções da API REST da Routa."
+---
+
+A API da Routa é REST sobre HTTPS, com requisições e respostas em JSON e autenticação por chave de API no formato `Bearer`. Esta página reúne as regras comuns a todos os endpoints. Cada endpoint tem a sua própria página, com parâmetros, exemplos e um *playground* para testar chamadas.
+
+A especificação OpenAPI completa está em [`openapi.json`](/openapi.json).
+
+## URL base
+
+```text
+https://api.routa.chat
+```
+
+Todos os endpoints públicos ficam sob o prefixo `/v1`. O ambiente (produção ou teste) é definido pela chave de API, não pela URL. Veja [Ambientes](/environments).
+
+<Note>
+  A API não define headers CORS. Chame-a sempre a partir do seu servidor e nunca de um navegador ou de um app, para não expor sua chave.
+</Note>
+
+## Autenticação
+
+Envie sua chave de API no header `Authorization`:
+
+```bash
+curl https://api.routa.chat/v1/whoami \
+  -H "Authorization: Bearer rt_live_..."
+```
+
+Cada chave pertence a um projeto e carrega escopos. Uma rota que exige um escopo ausente na chave responde `403 insufficient_scope`. Veja [Chaves de API](/authentication).
+
+## O que a chave de API alcança
+
+| Grupo | Rotas principais | Página |
+| --- | --- | --- |
+| Mensagens | `POST /v1/messages`, `GET /v1/messages`, `GET /v1/messages/{id}`, `POST /v1/messages/{id}/read` | [Mensagens](/api-reference/endpoint/messages/send) |
+| Eventos | `GET /v1/events` | [Eventos](/api-reference/endpoint/events/list) |
+| Webhooks | `/v1/webhook_endpoints` e sub-rotas (segredo, ativação, entregas, reenvio) | [Webhooks](/api-reference/endpoint/webhooks/create) |
+| Templates | `POST /v1/templates`, `GET /v1/templates`, `GET /v1/templates/{id}`, `POST /v1/templates/media` | [Templates](/api-reference/endpoint/templates/create) |
+| Mídia | `POST /v1/media`, `GET /v1/media/{id}` | [Mídia](/api-reference/endpoint/media/upload) |
+| Uso | `GET /v1/usage` | [Uso](/api-reference/endpoint/usage/retrieve) |
+| Identidade | `GET /v1/whoami` | [Identidade](/api-reference/endpoint/identity/whoami) |
+
+<Info>
+  Organizações, projetos, chaves de API, canais, membros e cobrança são gerenciados no **painel**, com sessão de usuário. Essas rotas não aceitam chave de API e não fazem parte desta referência.
+</Info>
+
+## Formato de resposta
+
+### Objeto único
+
+Um recurso é retornado diretamente, sem envelope:
+
+```json
+{
+  "id": "msg_01J8ZK9M3Q7X...",
+  "channel": "chan_01J8...",
+  "direction": "outbound",
+  "status": "accepted"
+}
+```
+
+### Listas
+
+Coleções vêm dentro de um envelope com metadados de paginação:
+
+```json
+{
+  "data": [{ "id": "msg_01J8..." }],
+  "has_more": true,
+  "next_cursor": "eyJ..."
+}
+```
+
+### Erro
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "channel_inactive",
+    "message": "Channel chan_01J8... is not active and cannot send messages.",
+    "param": "channel",
+    "request_id": "req_01J8..."
+  }
+}
+```
+
+Veja todos os campos em [Erros](/errors/overview).
+
+<Warning>
+  Algumas respostas não seguem o envelope de lista: `GET /v1/usage` devolve `{ from_date, to_date, data }` sem paginação, e `GET /v1/webhook_endpoints` devolve todos os endpoints de uma vez, com `has_more` sempre `false`. Confira o formato na página de cada endpoint.
+</Warning>
+
+Toda resposta traz o header `Routa-Request-Id`. Informe-o ao falar com o suporte.
+
+## Paginação
+
+As listas usam paginação por cursor. Não há `page` nem `offset`.
+
+| Parâmetro | Descrição |
+| --- | --- |
+| `limit` | Itens por página, de 1 a 100. O padrão é 20. |
+| `cursor` | O `next_cursor` da página anterior. |
+
+```bash
+curl "https://api.routa.chat/v1/messages?limit=50" \
+  -H "Authorization: Bearer $ROUTA_API_KEY"
+```
+
+`GET /v1/events` usa `after` (o id do último evento) no lugar de `cursor`. Veja [Paginação](/reliability/pagination).
+
+## Idempotência
+
+`POST /v1/messages` aceita o header `Idempotency-Key`. Repetir a requisição com a mesma chave e o mesmo corpo devolve a resposta original, com `Idempotent-Replay: true`, sem criar outra mensagem.
+
+| Situação | Resultado |
+| --- | --- |
+| Chave nova | A mensagem é criada. |
+| Mesma chave e mesmo corpo | Resposta original, com `Idempotent-Replay: true`. |
+| Mesma chave, requisição ainda em andamento | `409 idempotency_in_progress`, com `Retry-After`. |
+| Mesma chave, corpo diferente | `409 idempotency_key_reuse`. |
+
+As chaves são mantidas por 24 horas. Veja [Idempotência](/reliability/idempotency).
+
+## Limites de taxa
+
+Os limites são por projeto, por classe de endpoint.
+
+| Classe | Taxa sustentada | Rajada |
+| --- | --- | --- |
+| Envios (`POST /v1/messages`) | 50 req/s | 100 |
+| Escritas | 20 req/s | 40 |
+| Leituras | 100 req/s | 200 |
+
+Os headers `RateLimit-Limit`, `RateLimit-Remaining` e `RateLimit-Reset` vêm em toda resposta. Um `429` traz `Retry-After`:
+
+```http
+HTTP/1.1 429 Too Many Requests
+RateLimit-Limit: 50
+RateLimit-Remaining: 0
+RateLimit-Reset: 1
+Retry-After: 1
+```
+
+Veja [Limites de taxa](/reliability/rate-limits).
+
+## Status HTTP
+
+| Status | Significado |
+| --- | --- |
+| `200` | Sucesso. |
+| `201` | Recurso criado. |
+| `202` | `POST /v1/messages`: aceito, o envio é assíncrono. |
+| `401` | Chave de API ausente ou inválida. |
+| `402` | Franquia ou limite do plano esgotado. |
+| `403` | A chave não tem o escopo necessário. |
+| `404` | Recurso inexistente ou de outro projeto. |
+| `409` | Conflito de idempotência ou de estado. |
+| `422` | Requisição inválida. |
+| `429` | Limite de taxa excedido. |
+| `503` | A Routa não consegue processar agora. Tente de novo. |
+
+## Convenções
+
+### Telefone
+
+Use o formato **E.164**, como `+5581999999999`. O `+` inicial é opcional na entrada. As respostas trazem o número em E.164.
+
+### IDs
+
+Os identificadores são strings opacas com um prefixo que indica o tipo.
+
+| Prefixo | Recurso |
+| --- | --- |
+| `msg_` | Mensagem |
+| `chan_` | Canal |
+| `evt_` | Evento |
+| `tmpl_` | Template |
+| `med_` | Mídia |
+| `tmedia_` | Mídia de cabeçalho de template |
+| `whe_` | Endpoint de webhook |
+| `whd_` | Entrega de webhook |
+| `req_` | Requisição |
+
+### Datas
+
+Todas as datas e horários seguem o formato ISO 8601 em UTC, como `2026-09-04T13:22:41.031Z`. Parâmetros de data simples usam `YYYY-MM-DD`.
+
+### Enums
+
+Os valores de campos como `status` e `direction` são strings minúsculas. Em campos documentados como abertos, novos valores podem aparecer. Trate valores desconhecidos de forma segura.
+
+### Versionamento
+
+A versão está na URL (`/v1`). Dentro da `v1`, as mudanças são **apenas aditivas**: novos endpoints, novos campos opcionais de requisição e novos campos de resposta. Qualquer outra mudança vira `v2`. Ignore campos desconhecidos nas respostas.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Início rápido" icon="rocket" href="/quickstart">
+    Envie sua primeira mensagem.
+  </Card>
+  <Card title="Enviar mensagem" icon="paper-plane" href="/api-reference/endpoint/messages/send">
+    O endpoint principal da API.
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/webhooks/overview">
+    Receba eventos de entrega e mensagens recebidas.
+  </Card>
+  <Card title="SDK para Node.js" icon="node-js" href="/sdk/overview">
+    Use o cliente oficial em TypeScript.
+  </Card>
+</CardGroup>
