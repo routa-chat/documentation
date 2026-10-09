@@ -126,7 +126,8 @@
             "pages": [
               "api-reference/endpoint/templates/create",
               "api-reference/endpoint/templates/list",
-              "api-reference/endpoint/templates/retrieve"
+              "api-reference/endpoint/templates/retrieve",
+              "api-reference/endpoint/templates/upload-media"
             ]
           }
         ]
