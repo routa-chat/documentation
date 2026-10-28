@@ -60,7 +60,12 @@ O caso mais difícil é um timeout contra o provedor: a mensagem pode ou não te
 
 ## Recebimento
 
-Mensagens recebidas são persistidas antes de serem processadas, e a Routa deduplica reentregas do provedor. Conteúdo que ela não entende vira `content.type = "unsupported"`: a mensagem não é descartada. Se uma mídia recebida falha em definitivo, a mensagem continua existindo com a mídia `unavailable`.
+Mensagens recebidas são persistidas antes de serem processadas, e a Routa deduplica reentregas do provedor. Se uma mídia recebida falha em definitivo, a mensagem continua existindo com a mídia `unavailable`.
+
+A regra para o que a Routa não entende tem duas partes:
+
+- **Tipos que a Routa não modela** (como `interactive` e `contacts`) viram `content.type = "unsupported"`. A mensagem é gravada e gera `message.received`.
+- **Reações e avisos de sistema** (como a troca de número de um contato) são ignorados de propósito. Eles não criam mensagem, não geram `message.received` e não contam como uso. A Routa ainda não avisa sobre a troca de número: um envio para o número antigo pode falhar sem um aviso prévio.
 
 ## Eventos e webhooks
 

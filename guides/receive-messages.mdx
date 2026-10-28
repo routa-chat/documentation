@@ -90,7 +90,11 @@ Quando um cliente escreve para o seu número, a Routa normaliza a mensagem, grav
 
 ## Tipos de conteúdo recebidos
 
-O `content` de uma mensagem recebida pode ser `text`, `image`, `document`, `audio`, `video`, `sticker`, `location` ou `reaction`. Conteúdo que a Routa ainda não modela chega como `{ "type": "unsupported" }`: a mensagem não é descartada. Veja [Tipos de conteúdo](/concepts/messages).
+O `content` de uma mensagem recebida pode ser `text`, `image`, `document`, `audio`, `video`, `sticker` ou `location`. Um tipo que a Routa ainda não modela, como `interactive` ou `contacts`, chega como `{ "type": "unsupported" }`: a mensagem existe e gera `message.received`. Veja [Tipos de conteúdo](/concepts/messages).
+
+<Note>
+  Reações e avisos de sistema, como a troca de número de um contato, são **ignorados de propósito**. Eles não criam mensagem, não geram `message.received` e não contam como uso. A Routa ainda não avisa sobre a troca de número de um contato.
+</Note>
 
 ## Baixar a mídia recebida
 

@@ -85,7 +85,9 @@ Se o provedor falha de forma transitória, a Routa tenta de novo sozinha, com es
 
 Uma mensagem inbound nasce com `direction: "inbound"` e `status: "delivered"`, e gera o evento `message.received`. Para sinalizar ao remetente que você leu, use `POST /v1/messages/{id}/read`, que leva a mensagem para `read`.
 
-Conteúdo que a Routa ainda não sabe modelar chega como `{ "type": "unsupported" }`. A mensagem nunca é descartada por ser desconhecida.
+Um tipo de conteúdo que a Routa ainda não sabe modelar, como `interactive` ou `contacts`, chega como `{ "type": "unsupported" }`: a mensagem existe e gera `message.received`.
+
+Duas coisas recebidas são **ignoradas de propósito**: reações e avisos de sistema, como a troca de número de um contato. Elas não criam mensagem, não geram `message.received` e não contam como uso.
 
 ## Tipos de conteúdo
 
@@ -101,11 +103,11 @@ O campo `content` é um objeto discriminado por `type`.
 | `video` | `media_id`, `caption?` | Vídeo. |
 | `sticker` | `media_id` | Figurinha. |
 | `location` | `latitude`, `longitude`, `name?`, `address?` | Localização. |
-| `reaction` | `target_message_id`, `emoji` | Reação a outra mensagem. |
-| `unsupported` | n/d | Conteúdo recebido que a Routa ainda não modela. |
+| `reaction` | `target_message_id`, `emoji` | Reação a outra mensagem. O tipo existe no schema, mas hoje nenhuma mensagem o usa: reações recebidas são ignoradas e `POST /v1/messages` não envia reações. |
+| `unsupported` | n/d | Conteúdo recebido de um tipo que a Routa ainda não modela. |
 
 <Info>
-  Hoje `POST /v1/messages` envia apenas `text` e `template`. Os demais tipos aparecem em mensagens recebidas e no histórico, e você pode lê-los normalmente. Para baixar a mídia de uma mensagem, use o `media_id` em [`GET /v1/media/{id}`](/api-reference/endpoint/media/retrieve).
+  Hoje `POST /v1/messages` envia apenas `text` e `template`. Os demais tipos, com exceção de `reaction`, aparecem em mensagens recebidas e no histórico, e você pode lê-los normalmente. Para baixar a mídia de uma mensagem, use o `media_id` em [`GET /v1/media/{id}`](/api-reference/endpoint/media/retrieve).
 </Info>
 
 ## Validação no aceite
