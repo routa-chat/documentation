@@ -54,7 +54,7 @@
           "Mensagens"
         ],
         "summary": "Enviar mensagem",
-        "description": "Envia uma mensagem de texto ou de template por um canal.\n\nA resposta é `202 Accepted`: a mensagem foi gravada de forma durável, mas **ainda não foi entregue**. Acompanhe `sent`, `delivered`, `read` e `failed` por [webhooks](/webhooks/overview) ou por `GET /v1/messages/{id}`.\n\nInforme **exatamente um** entre `text` e `template`. Envie o header `Idempotency-Key` para repetir a requisição com segurança. Veja [Idempotência](/reliability/idempotency).\n\nA validação do canal, do destinatário e do template acontece no aceite e retorna `422` imediatamente.",
+        "description": "Envia uma mensagem de texto ou de template por um canal.\n\nA resposta é `202 Accepted`: a mensagem foi gravada de forma durável, mas **ainda não foi entregue**. Acompanhe `sent`, `delivered`, `read` e `failed` por [webhooks](/webhooks/overview) ou por `GET /v1/messages/{id}`.\n\nInforme **exatamente um** entre `text` e `template`. Envie o header `Idempotency-Key` para repetir a requisição com segurança. Veja [Idempotência](/reliability/idempotency).\n\nA validação do canal, do destinatário e do template acontece no aceite e retorna `422` imediatamente. Um template importado e somente leitura retorna `template_not_sendable`.",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -158,7 +158,7 @@
             }
           },
           "402": {
-            "description": "Franquia ou limite do plano esgotado (`message_quota_exceeded`, `subscription_required`, `payment_failed`)",
+            "description": "Franquia ou limite do plano esgotado (`message_quota_exceeded`, `free_messages_exhausted`, `subscription_required`, `payment_failed`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -529,7 +529,9 @@
                 "template.approved",
                 "template.rejected",
                 "template.paused",
-                "template.disabled"
+                "template.disabled",
+                "template.failed",
+                "template.category_changed"
               ]
             },
             "in": "query",
@@ -1888,7 +1890,7 @@
           "Templates"
         ],
         "summary": "Listar templates",
-        "description": "Lista os templates do projeto com paginação por cursor. Filtre por canal com `channel`.",
+        "description": "Lista os templates do projeto com paginação por cursor. Filtre por canal com `channel`. A listagem inclui os templates importados do WhatsApp (`origin: provider`), inclusive os somente leitura (`read_only: true`), que não podem ser usados para enviar.",
         "parameters": [
           {
             "schema": {
@@ -1990,7 +1992,7 @@
           "Templates"
         ],
         "summary": "Consultar template",
-        "description": "Retorna um template com o `status` de aprovação atual. Se ele foi rejeitado, `rejection_reason` indica o motivo.",
+        "description": "Retorna um template com o `status` de aprovação atual. Se ele foi rejeitado, `rejection_reason` indica o motivo. Se a Routa não conseguiu submetê-lo (`status: failed`), `failure_code` indica o motivo e é preciso criar o template de novo.",
         "parameters": [
           {
             "schema": {
@@ -2519,7 +2521,7 @@
                     }
                   ]
                 },
-                "description": "Valores acionáveis, como `limit`, `used` e `resets_at` em `message_quota_exceeded`."
+                "description": "Valores acionáveis, como `limit`, `used` e `resets_at` em `message_quota_exceeded`, ou `limit` e `used` em `free_messages_exhausted`."
               },
               "request_id": {
                 "type": "string",
@@ -2777,7 +2779,15 @@
                 }
               }
             ],
-            "description": "Conteúdo da mensagem. O campo `type` indica o formato."
+            "nullable": true,
+            "description": "Conteúdo da mensagem. O campo `type` indica o formato. É `null` depois que a retenção remove o conteúdo; nesse caso `content_redacted_at` traz o momento da remoção."
+          },
+          "content_redacted_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando a retenção removeu o conteúdo da mensagem. `null` enquanto a mensagem ainda tem o conteúdo.",
+            "example": null
           },
           "status": {
             "type": "string",
@@ -2789,6 +2799,12 @@
               "failed"
             ],
             "description": "Estado atual no ciclo de vida. O status nunca retrocede."
+          },
+          "failure_code": {
+            "type": "string",
+            "nullable": true,
+            "description": "Motivo da falha, de um conjunto fechado de códigos da Routa. `null` até a mensagem falhar.",
+            "example": null
           },
           "metadata": {
             "type": "object",
@@ -2839,7 +2855,9 @@
           "from",
           "to",
           "content",
+          "content_redacted_at",
           "status",
+          "failure_code",
           "metadata",
           "accepted_at",
           "sent_at",
@@ -2908,7 +2926,9 @@
               "template.approved",
               "template.rejected",
               "template.paused",
-              "template.disabled"
+              "template.disabled",
+              "template.failed",
+              "template.category_changed"
             ],
             "description": "Tipo do evento, no formato `recurso.ação_no_passado`."
           },
@@ -3165,9 +3185,10 @@
               "approved",
               "rejected",
               "paused",
-              "disabled"
+              "disabled",
+              "failed"
             ],
-            "description": "Estado de aprovação. Somente `approved` permite enviar."
+            "description": "Estado de aprovação. Somente `approved` permite enviar. `rejected` indica que o provedor analisou e recusou o template. `failed` indica que a Routa não conseguiu submetê-lo."
           },
           "rejection_reason": {
             "type": "string",
@@ -3181,6 +3202,54 @@
             ],
             "nullable": true,
             "description": "Motivo da rejeição, quando `status` é `rejected`."
+          },
+          "failure_code": {
+            "type": "string",
+            "enum": [
+              "provider_unavailable",
+              "provider_auth_failed",
+              "provider_rejected_request",
+              "channel_unavailable",
+              "media_unavailable",
+              "attempts_exhausted"
+            ],
+            "nullable": true,
+            "description": "Motivo da falha de submissão, quando `status` é `failed`. `null` nos demais status.",
+            "example": null
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "routa",
+              "provider"
+            ],
+            "description": "Quem criou o template: `routa` para um template submetido pela Routa, `provider` para um que já existia no WhatsApp e foi importado.",
+            "example": "routa"
+          },
+          "read_only": {
+            "type": "boolean",
+            "description": "`true` para um template importado que a Routa não consegue reproduzir. Enviar uma mensagem com ele retorna `422 template_not_sendable`. Sempre `false` quando `origin` é `routa`.",
+            "example": false
+          },
+          "unsupported_components": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "named_parameters",
+                "media_header",
+                "location_header",
+                "carousel",
+                "flow_button",
+                "otp_button",
+                "copy_code_button",
+                "catalog",
+                "limited_time_offer",
+                "other"
+              ]
+            },
+            "description": "Componentes de um template importado que a Routa não consegue reproduzir. Vazia quando `read_only` é `false`.",
+            "example": []
           },
           "created_at": {
             "format": "date-time",
@@ -3204,6 +3273,10 @@
           "variables",
           "status",
           "rejection_reason",
+          "failure_code",
+          "origin",
+          "read_only",
+          "unsupported_components",
           "created_at",
           "updated_at"
         ]

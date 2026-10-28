@@ -27,7 +27,7 @@ export const COPY = {
     201: 'Recurso criado',
     202: 'Aceito. O processamento é assíncrono',
     401: 'Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)',
-    402: 'Franquia ou limite do plano esgotado (`message_quota_exceeded`, `subscription_required`, `payment_failed`)',
+    402: 'Franquia ou limite do plano esgotado (`message_quota_exceeded`, `free_messages_exhausted`, `subscription_required`, `payment_failed`)',
     403: 'A chave não tem o escopo necessário (`insufficient_scope`)',
     404: 'O recurso não existe ou pertence a outro projeto',
     409: 'Conflito de idempotência ou de estado',
@@ -82,7 +82,7 @@ export const COPY = {
       scope: 'messages:write',
       summary: 'Enviar mensagem',
       description:
-        'Envia uma mensagem de texto ou de template por um canal.\n\nA resposta é `202 Accepted`: a mensagem foi gravada de forma durável, mas **ainda não foi entregue**. Acompanhe `sent`, `delivered`, `read` e `failed` por [webhooks](/webhooks/overview) ou por `GET /v1/messages/{id}`.\n\nInforme **exatamente um** entre `text` e `template`. Envie o header `Idempotency-Key` para repetir a requisição com segurança. Veja [Idempotência](/reliability/idempotency).\n\nA validação do canal, do destinatário e do template acontece no aceite e retorna `422` imediatamente.',
+        'Envia uma mensagem de texto ou de template por um canal.\n\nA resposta é `202 Accepted`: a mensagem foi gravada de forma durável, mas **ainda não foi entregue**. Acompanhe `sent`, `delivered`, `read` e `failed` por [webhooks](/webhooks/overview) ou por `GET /v1/messages/{id}`.\n\nInforme **exatamente um** entre `text` e `template`. Envie o header `Idempotency-Key` para repetir a requisição com segurança. Veja [Idempotência](/reliability/idempotency).\n\nA validação do canal, do destinatário e do template acontece no aceite e retorna `422` imediatamente. Um template importado e somente leitura retorna `template_not_sendable`.',
       headers: [
         {
           name: 'Idempotency-Key',
@@ -275,7 +275,8 @@ export const COPY = {
       tag: 'Templates',
       scope: 'templates:read',
       summary: 'Listar templates',
-      description: 'Lista os templates do projeto com paginação por cursor. Filtre por canal com `channel`.',
+      description:
+        'Lista os templates do projeto com paginação por cursor. Filtre por canal com `channel`. A listagem inclui os templates importados do WhatsApp (`origin: provider`), inclusive os somente leitura (`read_only: true`), que não podem ser usados para enviar.',
     },
     'GET /v1/templates/{id}': {
       id: 'retrieveTemplate',
@@ -283,7 +284,7 @@ export const COPY = {
       scope: 'templates:read',
       summary: 'Consultar template',
       description:
-        'Retorna um template com o `status` de aprovação atual. Se ele foi rejeitado, `rejection_reason` indica o motivo.',
+        'Retorna um template com o `status` de aprovação atual. Se ele foi rejeitado, `rejection_reason` indica o motivo. Se a Routa não conseguiu submetê-lo (`status: failed`), `failure_code` indica o motivo e é preciso criar o template de novo.',
       params: { id: 'Identificador do template (`tmpl_...`).' },
     },
     'POST /v1/templates/media': {
@@ -380,7 +381,7 @@ export const COPY = {
       },
       'error.param': 'O campo da requisição com problema, quando se aplica.',
       'error.doc_url': 'Link para a documentação do código, quando disponível.',
-      'error.details': 'Valores acionáveis, como `limit`, `used` e `resets_at` em `message_quota_exceeded`.',
+      'error.details': 'Valores acionáveis, como `limit`, `used` e `resets_at` em `message_quota_exceeded`, ou `limit` e `used` em `free_messages_exhausted`.',
       'error.request_id': {
         description: 'Identificador da requisição. Informe-o ao falar com o suporte.',
         example: 'req_01J8ZK9M3Q7XABCDEFGHJKMNPQ',
@@ -392,8 +393,10 @@ export const COPY = {
       direction: 'Direção da mensagem: `outbound` (enviada por você) ou `inbound` (recebida).',
       from: { description: 'Endereço de origem, em E.164.', example: '+5581988888888' },
       to: { description: 'Endereço de destino, em E.164.', example: '+5581999999999' },
-      content: 'Conteúdo da mensagem. O campo `type` indica o formato.',
+      content: 'Conteúdo da mensagem. O campo `type` indica o formato. É `null` depois que a retenção remove o conteúdo; nesse caso `content_redacted_at` traz o momento da remoção.',
+      content_redacted_at: { description: 'Quando a retenção removeu o conteúdo da mensagem. `null` enquanto a mensagem ainda tem o conteúdo.', example: null },
       status: 'Estado atual no ciclo de vida. O status nunca retrocede.',
+      failure_code: { description: 'Motivo da falha, de um conjunto fechado de códigos da Routa. `null` até a mensagem falhar.', example: null },
       metadata: 'Até 20 pares chave-valor de texto, de propriedade do cliente.',
       accepted_at: { description: 'Quando a Routa aceitou a mensagem.', example: TS },
       sent_at: { description: 'Quando o provedor aceitou a mensagem. `null` se ainda não ocorreu.', example: TS },
@@ -430,8 +433,12 @@ export const COPY = {
       category: 'Categoria: `marketing`, `utility` ou `authentication`.',
       variables: 'Placeholders posicionais do corpo (`{{1}}`, `{{2}}`, …).',
       components: 'Cabeçalho, rodapé e botões do template, quando existirem.',
-      status: 'Estado de aprovação. Somente `approved` permite enviar.',
+      status: 'Estado de aprovação. Somente `approved` permite enviar. `rejected` indica que o provedor analisou e recusou o template. `failed` indica que a Routa não conseguiu submetê-lo.',
       rejection_reason: 'Motivo da rejeição, quando `status` é `rejected`.',
+      failure_code: { description: 'Motivo da falha de submissão, quando `status` é `failed`. `null` nos demais status.', example: null },
+      origin: { description: 'Quem criou o template: `routa` para um template submetido pela Routa, `provider` para um que já existia no WhatsApp e foi importado.', example: 'routa' },
+      read_only: { description: '`true` para um template importado que a Routa não consegue reproduzir. Enviar uma mensagem com ele retorna `422 template_not_sendable`. Sempre `false` quando `origin` é `routa`.', example: false },
+      unsupported_components: { description: 'Componentes de um template importado que a Routa não consegue reproduzir. Vazia quando `read_only` é `false`.', example: [] },
       created_at: { description: 'Quando o template foi criado.', example: TS },
       updated_at: { description: 'Quando o template foi atualizado pela última vez.', example: TS },
     },
