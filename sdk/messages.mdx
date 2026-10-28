@@ -105,15 +105,35 @@ Os campos do SDK são os da API em *camelCase*.
 | `channel` | `string` | Canal usado. |
 | `direction` | `'outbound' \| 'inbound'` | Direção. |
 | `from`, `to` | `string` | Endereços em E.164. |
-| `content` | `MessageContent` | Conteúdo, discriminado por `type`. |
+| `content` | `MessageContent \| null` | Conteúdo, discriminado por `type`. É `null` quando a retenção removeu o conteúdo. Vale a partir da 0.2.0. Na 0.1.0 o tipo é `MessageContent`. |
 | `status` | `MessageStatus` | `accepted`, `sent`, `delivered`, `read` ou `failed`. |
 | `metadata` | `Record<string, string>` | Metadados do cliente. |
 | `acceptedAt` | `string` | ISO 8601, sempre presente. |
 | `sentAt`, `deliveredAt`, `readAt`, `failedAt` | `string \| null` | Momento de cada etapa. |
+| `contentRedactedAt` | `string \| null` | ISO 8601. Quando a retenção removeu o conteúdo, ou `null` enquanto a mensagem ainda o tem. Vale a partir da 0.2.0. |
 | `_replayed` | `boolean` | `true` quando a chamada devolveu o resultado de uma tentativa anterior com a mesma `Idempotency-Key`. |
 
+### Mensagens com conteúdo removido
+
+A Routa remove o conteúdo de uma mensagem depois do período de retenção do plano. A API devolve essa mensagem com `content: null` e `content_redacted_at`. O restante dela continua. Veja [Conteúdo removido pela retenção](/concepts/messages#conteúdo-removido-pela-retenção).
+
+O SDK trata isso de forma diferente em cada versão:
+
+- **Na 0.1.0:** `content` é tipado como `MessageContent`, sem `null`, e `contentRedactedAt` não existe. `messages.retrieve()` e `messages.list()` lançam `TypeError` ao encontrar uma mensagem com o conteúdo removido. Uma só dessas mensagens derruba a listagem inteira. Se você usa a 0.1.0 e tem mensagens mais antigas que a retenção, atualize para a 0.2.0 ou leia as mensagens pela [API REST](/api-reference/endpoint/messages/list).
+- **A partir da 0.2.0:** `content` é `MessageContent | null` e `contentRedactedAt` é `string | null`. Essas mensagens são devolvidas normalmente. Como o tipo de `content` mudou, o código que lê `message.content` sem verificar deixa de compilar. Proteja a leitura:
+
+```ts
+for await (const message of routa.messages.list({ limit: 50 })) {
+  if (message.content) {
+    console.log(message.id, message.content.type)
+  } else {
+    console.log(message.id, 'conteúdo removido em', message.contentRedactedAt)
+  }
+}
+```
+
 <Note>
-  **Ainda não suportado na versão 0.1.0.** Quando a retenção remove o conteúdo de uma mensagem, a API devolve `content: null` e `content_redacted_at`. A API também devolve `failure_code` em uma mensagem que falhou. Esses campos existem na API, mas não estão nos tipos do SDK: `content` é tipado como `MessageContent`, sem `null`, e `contentRedactedAt` e `failureCode` não existem. Além disso, `messages.retrieve()` e `messages.list()` lançam `TypeError` ao encontrar uma mensagem com o conteúdo removido. Se o seu projeto tem mensagens mais antigas que a retenção, leia-as pela [API REST](/api-reference/endpoint/messages/list). Veja [Conteúdo removido pela retenção](/concepts/messages#conteúdo-removido-pela-retenção).
+  **Ainda não suportado em nenhuma versão.** A API devolve `failure_code` em uma mensagem que falhou, mas o SDK não o inclui: `failureCode` não está nos tipos nem no objeto devolvido. Leia o motivo da falha pela [API REST](/api-reference/endpoint/messages/retrieve).
 </Note>
 
-`MessageContent` cobre também tipos que só chegam em mensagens recebidas ou no histórico (mídia, localização, reação) e `unsupported`, para que ler uma mensagem nunca lance erro só porque o tipo ainda não é enviável.
+`MessageContent` cobre também tipos que só chegam em mensagens recebidas ou no histórico (mídia, localização, reação) e `unsupported`, para que ler uma mensagem não lance erro só porque o tipo de conteúdo ainda não é enviável. Isso é independente do `null` descrito acima, que indica conteúdo removido, não um tipo desconhecido.
