@@ -15,7 +15,9 @@ Uma mensagem representa uma comunicação em qualquer direção: `outbound` (env
   "from": "+5581988888888",
   "to": "+5581999999999",
   "content": { "type": "text", "body": "Olá! Seu pedido foi confirmado." },
+  "content_redacted_at": null,
   "status": "delivered",
+  "failure_code": null,
   "metadata": { "order_id": "1234" },
   "accepted_at": "2026-09-04T13:22:40.812Z",
   "sent_at": "2026-09-04T13:22:41.031Z",
@@ -31,13 +33,23 @@ Uma mensagem representa uma comunicação em qualquer direção: `outbound` (env
 | `channel` | Canal usado (`chan_...`). |
 | `direction` | `outbound` ou `inbound`. |
 | `from`, `to` | Endereços no formato E.164. |
-| `content` | Conteúdo, um objeto com `type`. Veja a tabela de tipos de conteúdo abaixo. |
+| `content` | Conteúdo, um objeto com `type`. Veja a tabela de tipos de conteúdo abaixo. É `null` depois que a retenção remove o conteúdo. |
+| `content_redacted_at` | Quando a retenção removeu o conteúdo, ou `null` enquanto a mensagem ainda o tem. |
 | `status` | Estado atual no ciclo de vida. |
+| `failure_code` | Motivo da falha, de um conjunto fechado de códigos da Routa. É `null` até a mensagem falhar. |
 | `metadata` | Até 20 pares chave-valor de texto, de propriedade do cliente. Total de até 1 KB. |
 | `accepted_at` | Quando a Routa aceitou a mensagem. Sempre presente. |
 | `sent_at`, `delivered_at`, `read_at`, `failed_at` | Momento de cada transição, ou `null` se ela não ocorreu. |
 
 Use `metadata` para ligar a mensagem ao seu domínio, por exemplo o ID do pedido. Ele é devolvido na consulta e nos eventos.
+
+### Conteúdo removido pela retenção
+
+A Routa mantém o conteúdo de uma mensagem por um período que depende do plano. Depois dele, o conteúdo é removido: `content` passa a ser `null` e `content_redacted_at` traz o momento da remoção. O restante da mensagem continua, inclusive `metadata`.
+
+<Note>
+  Trate `content` como opcional ao ler mensagens antigas. A remoção é permanente: aumentar a retenção depois não traz o conteúdo de volta. Os eventos `message.*` já entregues não mudam. Veja [Retenção de dados](/reliability/delivery-guarantees#retenção-do-conteúdo-de-mensagens).
+</Note>
 
 ## Ciclo de vida
 

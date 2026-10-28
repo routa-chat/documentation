@@ -91,8 +91,21 @@ Períodos de retenção publicados como parte do contrato da API.
 
 | Dado | Retenção |
 | --- | --- |
-| Conteúdo de mensagens | 12 meses |
+| Conteúdo de mensagens | Depende do plano: 60 dias (Starter), 120 dias (Essential) ou 365 dias (Growth e Pro). O projeto pode escolher um período menor. |
 | Mídia | 90 dias |
 | Eventos | 90 dias |
 | Registros de entrega de webhook | 30 dias |
 | Chaves de idempotência | 24 horas |
+
+### Retenção do conteúdo de mensagens
+
+O período é contado a partir de `accepted_at`. Passado o período, a Routa remove o **conteúdo** da mensagem. O restante dela continua: identificadores, endereços, `status`, horários e `metadata`.
+
+- **O plano define o máximo.** Cada plano mantém o conteúdo por um número de dias. Veja os valores na tabela acima e no [site da Routa](https://routa.chat).
+- **O projeto pode escolher menos.** Nas configurações do projeto, no painel, você escolhe 30, 60, 120 ou 365 dias. A escolha nunca passa do máximo do plano.
+- **A remoção é permanente.** Aumentar a retenção depois não traz de volta um conteúdo que já foi removido.
+- **A remoção não é instantânea.** Ela roda periodicamente, e uma mensagem que ainda está sendo enviada só perde o conteúdo depois que o envio termina.
+- **`metadata` não é removido.** Ele é seu e continua na mensagem.
+- **Um rebaixamento de plano encurta o período.** O novo máximo vale a partir da próxima remoção, sem prazo de tolerância. Veja [Planos e franquia](/billing/plans-and-quota#mudar-de-plano).
+
+Uma mensagem sem conteúdo traz `content: null` e `content_redacted_at` preenchido. Veja [Conteúdo removido pela retenção](/concepts/messages#conteudo-removido-pela-retencao).
