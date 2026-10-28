@@ -43,7 +43,7 @@ Use um template para enviar uma mensagem aprovada pelo WhatsApp, com valores var
   <Step title="Aguarde a aprovação">
     O provedor decide no tempo dele. Acompanhe de duas formas:
 
-    - **Webhook:** assine `template.*` e espere `template.approved` ou `template.rejected`.
+    - **Webhook:** assine `template.*` e espere `template.approved`, `template.rejected` ou `template.failed`.
     - **Consulta:** `GET /v1/templates/{id}` e verifique `status`.
 
     ```bash
@@ -51,7 +51,8 @@ Use um template para enviar uma mensagem aprovada pelo WhatsApp, com valores var
       -H "Authorization: Bearer $ROUTA_API_KEY"
     ```
 
-    Se o template for rejeitado, `rejection_reason` indica o motivo. Corrija e submeta de novo com outro nome.
+    - Se o template for **rejeitado** (`rejected`), `rejection_reason` indica o motivo. Corrija e submeta de novo com outro nome.
+    - Se a **submissão falhar** (`failed`), a Routa não conseguiu enviar o template ao provedor. `failure_code` indica o motivo. Você não consegue reenviar: crie o template de novo. Veja [Quando a submissão falha](/concepts/templates#quando-a-submissão-falha).
   </Step>
   <Step title="Envie com parâmetros">
     Com o template `approved`, passe `template.id` e os `body_parameters` na ordem dos placeholders.

@@ -12,7 +12,8 @@ A Routa submete o template e acompanha o resultado. **A aprovação é decidida 
 ```text
 draft → submitted → pending → approved
                             → rejected
-approved → paused | disabled   (o provedor pode fazer isso a qualquer momento)
+        submitted → failed             (a Routa não conseguiu submeter)
+approved → paused | disabled           (o provedor pode fazer isso a qualquer momento)
 ```
 
 | Status | Significado |
@@ -24,8 +25,11 @@ approved → paused | disabled   (o provedor pode fazer isso a qualquer momento)
 | `rejected` | Rejeitado. O campo `rejection_reason` explica o motivo. |
 | `paused` | Pausado pelo provedor, por exemplo por baixa qualidade. Não pode ser usado para enviar. |
 | `disabled` | Desativado pelo provedor. |
+| `failed` | A Routa não conseguiu submeter o template ao provedor. O campo `failure_code` explica o motivo. Veja [Quando a submissão falha](#quando-a-submissão-falha). |
 
-Cada mudança gera um evento (`template.submitted`, `template.pending`, `template.approved`, `template.rejected`, `template.paused`, `template.disabled`). Assine `template.*` para acompanhar a aprovação sem consultar a API.
+`rejected` e `failed` não são a mesma coisa. Em `rejected`, o provedor analisou o template e o recusou. Em `failed`, a análise nem aconteceu, porque a submissão não chegou ao fim.
+
+Cada mudança gera um evento (`template.submitted`, `template.pending`, `template.approved`, `template.rejected`, `template.paused`, `template.disabled`, `template.failed`). Assine `template.*` para acompanhar a aprovação sem consultar a API. O evento `template.category_changed` avisa quando o provedor muda a categoria de um template. Veja [Tipos de evento](/webhooks/event-types#eventos-de-template).
 
 ### Motivos de rejeição
 
@@ -39,6 +43,58 @@ Cada mudança gera um evento (`template.submitted`, `template.pending`, `templat
 | `scam` | Suspeita de golpe. |
 | `tag_content_mismatch` | O conteúdo não corresponde à etiqueta declarada. |
 | `other` | Outro motivo. |
+
+### Quando a submissão falha
+
+A Routa tenta submeter o template ao provedor **até 5 vezes**, com esperas crescentes entre as tentativas (de 1 minuto a 1 hora). Só uma falha temporária do provedor é tentada de novo. Os demais motivos encerram a submissão na primeira tentativa. Quando a submissão termina sem sucesso, o template vira `failed` e `template.failed` é gerado.
+
+`failure_code` só vem preenchido quando `status` é `failed`. Nos demais status, ele é `null`. Usa um conjunto fechado de valores da Routa, não os códigos do provedor.
+
+| Valor | Descrição |
+| --- | --- |
+| `provider_unavailable` | O provedor ficou indisponível, limitou as requisições ou respondeu com erro em todas as tentativas. |
+| `provider_auth_failed` | O provedor recusou a credencial do canal. Verifique a conexão do canal no painel. |
+| `provider_rejected_request` | O provedor considerou a requisição de submissão inválida. Revise os campos e crie o template de novo. |
+| `channel_unavailable` | O canal está desativado, foi removido ou não tem mais suporte a templates. |
+| `media_unavailable` | O arquivo do cabeçalho de mídia não está mais disponível. Envie a mídia de novo. |
+| `attempts_exhausted` | As tentativas acabaram sem que um motivo mais específico fosse registrado. |
+
+Você não consegue reenviar um template `failed`. Crie o template de novo com `POST /v1/templates`.
+
+<Note>
+  Uma submissão que falhou pode ter chegado ao provedor sem que a Routa visse a resposta. Nesse caso, o provedor ainda pode responder depois, e o template sai de `failed` para `pending`, `approved` ou `rejected`. Trate `failed` como um estado que a resposta do provedor pode corrigir.
+</Note>
+
+## Templates importados
+
+Além dos templates que você cria pela API, a Routa lista os que **já existiam no WhatsApp** do canal. Esses templates são importados, com o status que o provedor tem para eles.
+
+| Campo | Descrição |
+| --- | --- |
+| `origin` | `routa` para um template submetido pela Routa. `provider` para um template que já existia e foi importado. |
+| `read_only` | `true` quando a Routa não consegue reproduzir o template importado. Sempre `false` quando `origin` é `routa`. |
+| `unsupported_components` | Lista dos componentes que a Routa não consegue reproduzir. Vazia quando `read_only` é `false`. |
+
+<Warning>
+  Um template com `read_only: true` aparece na listagem, mas **não pode ser usado para enviar**. `POST /v1/messages` com ele retorna `422 template_not_sendable`. Crie na API um template equivalente ou use outro.
+</Warning>
+
+A importação é **silenciosa**: ela não gera evento nem webhook, porque você não fez nada para o template aparecer. Consulte `GET /v1/templates` para ver o que foi importado.
+
+`unsupported_components` usa um conjunto fechado de valores da Routa.
+
+| Valor | Descrição |
+| --- | --- |
+| `named_parameters` | O corpo usa variáveis nomeadas em vez de posicionais (`{{1}}`, `{{2}}`). |
+| `media_header` | O template tem cabeçalho de imagem, vídeo ou documento. |
+| `location_header` | O template tem cabeçalho de localização. |
+| `carousel` | O template é um carrossel. |
+| `flow_button` | O template tem um botão que abre um fluxo. |
+| `otp_button` | O template tem um botão de código de uso único. |
+| `copy_code_button` | O template tem um botão de copiar código. |
+| `catalog` | O template usa um catálogo de produtos. |
+| `limited_time_offer` | O template é uma oferta por tempo limitado. |
+| `other` | Outro componente que a Routa não consegue reproduzir. |
 
 ## Submeter um template
 
@@ -141,5 +197,5 @@ Com o template `approved`, envie-o em `POST /v1/messages` informando o `id` e os
 `text` e `template` são mutuamente exclusivos. A quantidade de `body_parameters` precisa ser igual à de variáveis do template. Veja o passo a passo em [Enviar um template](/guides/send-template-message).
 
 <Warning>
-  A Routa verifica o template **no aceite**. Se ele não estiver aprovado, a chamada falha na hora com `template_not_approved` (ou `template_paused`), em vez de gerar um `message.failed` depois.
+  A Routa verifica o template **no aceite**. Se ele não estiver aprovado, a chamada falha na hora com `template_not_approved` (ou `template_paused`), em vez de gerar um `message.failed` depois. Um template importado e somente leitura falha com `template_not_sendable`.
 </Warning>
