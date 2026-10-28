@@ -93,6 +93,7 @@ A Routa valida o template no aceite, então estes erros voltam na hora:
 | `template_not_found` | O template não existe neste projeto (`404`). |
 | `template_not_approved` | O template ainda não foi aprovado, ou foi rejeitado ou desativado (`422`). |
 | `template_paused` | O provedor pausou o template (`422`). |
+| `template_not_sendable` | O template foi importado do WhatsApp e é somente leitura (`422`). Crie um equivalente pela API ou use outro. |
 | `content_rejected` | A quantidade de `body_parameters` não bate com as variáveis do template (`422`). |
 
 <Info>

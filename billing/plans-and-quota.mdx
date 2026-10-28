@@ -18,6 +18,10 @@ Cada organização tem um **plano**, e cada plano inclui uma **franquia** de men
 - Mensagens **recebidas** nunca contam nem são bloqueadas, porque recusar uma mensagem recebida perderia o dado do seu cliente.
 - [Projetos de teste](/environments) não são contados nem bloqueados.
 
+## Mensagens grátis
+
+Uma organização que nunca assinou um plano pode enviar **10 mensagens grátis**, uma única vez, de projetos de produção. Essa franquia não renova e acaba quando uma assinatura em situação regular começa. As mensagens que você já usou não contam contra o plano. Depois das 10, `POST /v1/messages` responde `402` com o código `free_messages_exhausted`, e `details.limit` e `details.used` mostram o consumo.
+
 ## Quando a franquia acaba
 
 Ao atingir o limite, os **envios param** e `POST /v1/messages` responde `402 Payment Required`:

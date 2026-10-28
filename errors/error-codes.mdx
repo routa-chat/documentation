@@ -17,7 +17,8 @@ Este catálogo lista os códigos que as rotas da API pública (autenticadas por 
 | Código | Status | Causa e solução |
 | --- | --- | --- |
 | `message_quota_exceeded` | `402` | A franquia de mensagens do período acabou. `details` traz `limit`, `used` e `resets_at`. Aguarde a renovação, ative o excedente ou troque de plano. Veja [Planos e franquia](/billing/plans-and-quota). |
-| `subscription_required` | `402` | A organização não tem uma assinatura ativa para enviar de projetos de produção. |
+| `free_messages_exhausted` | `402` | A organização nunca assinou um plano e já usou as 10 mensagens grátis, que valem uma única vez. `details` traz `limit` e `used`, sem `resets_at`, porque essa franquia não renova. Escolha um plano no painel. Projetos de teste não são afetados. Veja [Planos e franquia](/billing/plans-and-quota#mensagens-grátis). |
+| `subscription_required` | `402` | A organização teve uma assinatura que não está mais em situação regular, por exemplo cancelada ou não paga, e não pode enviar de projetos de produção. Contrate um plano no painel. Quem nunca assinou recebe `free_messages_exhausted` depois das mensagens grátis. |
 | `payment_failed` | `402` | O pagamento da assinatura falhou e o período de tolerância acabou. Atualize a forma de pagamento no painel. |
 
 <Warning>
@@ -73,6 +74,7 @@ Um recurso de outro projeto também retorna `404`, para não revelar que ele exi
 | --- | --- |
 | `template_not_approved` | O template ainda não foi aprovado, ou foi rejeitado ou desativado. |
 | `template_paused` | O provedor pausou o template. |
+| `template_not_sendable` | O template foi importado do WhatsApp e é somente leitura (`read_only: true`): ele usa algo que a Routa ainda não consegue enviar. Crie um template equivalente pela API ou use outro. Veja [Templates importados](/concepts/templates#templates-importados). |
 | `template_variables_invalid` | As variáveis `{{n}}` do corpo são inválidas (por exemplo, fora de sequência). |
 | `template_components_invalid` | Cabeçalho, rodapé ou botões violam as regras de componentes. Veja [Templates](/concepts/templates#componentes-ricos). |
 | `template_media_invalid` | O arquivo do cabeçalho está ausente, sem `Content-Type` ou tem tipo ou tamanho inválido. |
@@ -85,7 +87,7 @@ Um recurso de outro projeto também retorna `404`, para não revelar que ele exi
 | `media_source_url_invalid` | Um corpo JSON precisa de uma `source_url` não vazia. |
 | `media_source_blocked` | A URL aponta para um endereço privado ou reservado. |
 | `media_source_unreachable` | A Routa não conseguiu baixar a URL (timeout ou resposta de erro). |
-| `media_content_type_rejected` | Tipo de arquivo não suportado. Veja [Mídia](/concepts/media). |
+| `media_content_type_rejected` | Tipo de arquivo não suportado, ou os bytes do arquivo não correspondem ao `Content-Type` declarado. Veja [Mídia](/concepts/media). |
 | `media_size_limit_exceeded` | O arquivo excede o limite do tipo. |
 
 ### Webhooks

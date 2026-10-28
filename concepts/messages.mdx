@@ -115,7 +115,7 @@ A Routa valida a mensagem **no momento do aceite**, não no despacho. Isso trans
 - O canal precisa estar `active` (`channel_inactive`).
 - O canal precisa suportar o tipo de conteúdo (`capability_unsupported`).
 - O destinatário precisa ser um número válido (`invalid_recipient`).
-- Um template precisa estar aprovado e com o número certo de parâmetros (`template_not_approved`, `template_paused`, `content_rejected`).
+- Um template precisa estar aprovado, poder ser enviado e ter o número certo de parâmetros (`template_not_approved`, `template_paused`, `template_not_sendable`, `content_rejected`).
 - Informe exatamente um entre `text` e `template` (`content_rejected`).
 
 Veja todos os códigos em [Códigos de erro](/errors/error-codes).

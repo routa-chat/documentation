@@ -44,6 +44,7 @@ Alguns erros trazem `details` com valores que você pode usar programaticamente:
 | Código | Campos em `details` |
 | --- | --- |
 | `message_quota_exceeded` | `limit` (franquia do período), `used` (usado) e `resets_at` (quando a franquia renova, ISO 8601). |
+| `free_messages_exhausted` | `limit` (mensagens grátis) e `used` (usado). Não traz `resets_at`, porque essa franquia não renova. |
 | `project_limit_exceeded`, `channel_limit_exceeded` | `limit`. |
 | `insufficient_permission` | `permission` (a capacidade exigida). |
 
