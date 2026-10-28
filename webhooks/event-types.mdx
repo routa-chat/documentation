@@ -96,6 +96,10 @@ Disparado quando o status de um canal muda, por exemplo quando ele passa a `degr
 | `template.rejected` | O template foi rejeitado. Veja `rejection_reason` em `data`. |
 | `template.paused` | O provedor pausou o template. |
 | `template.disabled` | O provedor desativou o template. |
+| `template.failed` | A Routa não conseguiu submeter o template ao provedor. Veja `failure_code` em `data`. |
+| `template.category_changed` | O provedor mudou a categoria do template. `data` traz também `previous_category`. |
+
+A importação de um template que já existia no WhatsApp **não** gera evento. Veja [Templates importados](/concepts/templates#templates-importados).
 
 ```json template.approved
 {
@@ -116,8 +120,44 @@ Disparado quando o status de um canal muda, por exemplo quando ele passa a `degr
     "variables": [{ "index": 1 }, { "index": 2 }],
     "status": "approved",
     "rejection_reason": null,
+    "failure_code": null,
+    "origin": "routa",
+    "read_only": false,
+    "unsupported_components": [],
     "created_at": "2026-09-04T15:00:00.000Z",
     "updated_at": "2026-09-04T15:10:00.000Z"
+  }
+}
+```
+
+`template.category_changed` traz o template completo no estado atual, com a nova categoria em `category`, mais o campo `previous_category`. Use-o para entender por que o custo de um envio mudou.
+
+```json template.category_changed
+{
+  "id": "evt_01J8...",
+  "type": "template.category_changed",
+  "api_version": "v1",
+  "schema_version": 1,
+  "project_id": "proj_01J8...",
+  "sequence": 918600,
+  "occurred_at": "2026-09-04T16:30:00.000Z",
+  "recorded_at": "2026-09-04T16:30:00.180Z",
+  "data": {
+    "id": "tmpl_01J8...",
+    "channel": "chan_01J8...",
+    "name": "confirmacao_pedido",
+    "language": "pt_BR",
+    "category": "marketing",
+    "previous_category": "utility",
+    "variables": [{ "index": 1 }, { "index": 2 }],
+    "status": "approved",
+    "rejection_reason": null,
+    "failure_code": null,
+    "origin": "routa",
+    "read_only": false,
+    "unsupported_components": [],
+    "created_at": "2026-09-04T15:00:00.000Z",
+    "updated_at": "2026-09-04T16:30:00.000Z"
   }
 }
 ```

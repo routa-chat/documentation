@@ -61,6 +61,8 @@ Como `data` traz o recurso completo, um consumidor que processa apenas o último
 | `template.rejected` | O template foi rejeitado. | Template |
 | `template.paused` | O provedor pausou o template. | Template |
 | `template.disabled` | O provedor desativou o template. | Template |
+| `template.failed` | A Routa não conseguiu submeter o template ao provedor. | Template |
+| `template.category_changed` | O provedor mudou a categoria do template. | Template, mais `previous_category` |
 
 Veja os detalhes de cada tipo em [Tipos de evento](/webhooks/event-types).
 
