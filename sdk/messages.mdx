@@ -112,4 +112,8 @@ Os campos do SDK são os da API em *camelCase*.
 | `sentAt`, `deliveredAt`, `readAt`, `failedAt` | `string \| null` | Momento de cada etapa. |
 | `_replayed` | `boolean` | `true` quando a chamada devolveu o resultado de uma tentativa anterior com a mesma `Idempotency-Key`. |
 
+<Note>
+  **Ainda não suportado na versão 0.1.0.** Quando a retenção remove o conteúdo de uma mensagem, a API devolve `content: null` e `content_redacted_at`. A API também devolve `failure_code` em uma mensagem que falhou. Esses campos existem na API, mas não estão nos tipos do SDK: `content` é tipado como `MessageContent`, sem `null`, e `contentRedactedAt` e `failureCode` não existem. Além disso, `messages.retrieve()` e `messages.list()` lançam `TypeError` ao encontrar uma mensagem com o conteúdo removido. Se o seu projeto tem mensagens mais antigas que a retenção, leia-as pela [API REST](/api-reference/endpoint/messages/list). Veja [Conteúdo removido pela retenção](/concepts/messages#conteúdo-removido-pela-retenção).
+</Note>
+
 `MessageContent` cobre também tipos que só chegam em mensagens recebidas ou no histórico (mídia, localização, reação) e `unsupported`, para que ler uma mensagem nunca lance erro só porque o tipo ainda não é enviável.

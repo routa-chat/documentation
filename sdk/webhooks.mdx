@@ -90,7 +90,7 @@ const event = await routa.webhooks.constructEvent(rawBody, header, [newSecret, o
 
 ### Tipos de evento
 
-O SDK conhece `message.accepted`, `message.sent`, `message.delivered`, `message.read`, `message.failed`, `message.received`, `channel.status_changed` e `template.*`. Um tipo introduzido depois da sua versão instalada ainda é interpretado: chega como um evento genérico, com `type` do tipo `string` e `data` como `unknown`, e é seguro ignorá-lo.
+O SDK conhece `message.accepted`, `message.sent`, `message.delivered`, `message.read`, `message.failed`, `message.received`, `channel.status_changed` e os eventos `template.submitted`, `template.pending`, `template.approved`, `template.rejected`, `template.paused` e `template.disabled`. `template.failed` e `template.category_changed` ainda não estão nos tipos. Um tipo introduzido depois da sua versão instalada ainda é interpretado: chega como um evento genérico, com `type` do tipo `string` e `data` como `unknown`, e é seguro ignorá-lo.
 
 <Info>
   Como o último membro da união `RoutaEvent` tem `type: string`, um `switch (event.type)` sozinho não estreita os outros campos. Verifique `'id' in event` antes para obter o envelope completo.

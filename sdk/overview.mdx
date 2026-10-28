@@ -114,6 +114,7 @@ Conheça estas lacunas antes de construir sobre o SDK. Todas estão disponíveis
 - **Envio de mídia, localização ou reações.** `messages.send()` aceita apenas `text` e `template`. Mensagens recebidas e históricas desses tipos podem ser lidas, mas não enviadas.
 - **Canais.** Não existe o namespace `routa.channels`. Conecte e gerencie canais no painel e passe o id do canal para `send()`.
 - **Componentes de template.** `templates.submit()` aceita apenas o corpo de texto. Cabeçalho, rodapé e botões dependem da API REST.
+- **Campos e eventos recentes da API.** Os tipos da versão 0.1.0 não incluem o status `failed` de template, `failure_code`, `origin`, `read_only`, `content_redacted_at` nem os eventos `template.failed` e `template.category_changed`. Veja [Mensagens](/sdk/messages) e [Eventos, templates, mídia e uso](/sdk/resources).
 
 ## Contribuir
 
