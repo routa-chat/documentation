@@ -84,11 +84,14 @@ import type {
 
 ### Conteúdo da mensagem
 
-`MessageContent` é uma união discriminada por `type`. Estreite pelo campo:
+`MessageContent` é uma união discriminada por `type`. Estreite pelo campo. A partir da versão 0.2.0, `message.content` também pode ser `null`, quando a retenção removeu o conteúdo. Verifique isso antes do `switch`:
 
 ```ts
 function describe(message: Message): string {
   const { content } = message
+  if (content === null) {
+    return '(conteúdo removido pela retenção)'
+  }
   switch (content.type) {
     case 'text':
       return content.body
