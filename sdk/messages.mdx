@@ -7,7 +7,7 @@ description: "Envie, consulte, liste e marque mensagens como lidas com routa.mes
 
 ## `send`
 
-Envia texto ou um template aprovado. Retorna a mensagem no estado `accepted`.
+Envia texto ou um template aprovado. Retorna a mensagem no estado `accepted`. O SDK **não envia mídia, localização nem reações**: `send()` aceita só `text` e `template`.
 
 ```ts
 const message = await routa.messages.send({
@@ -104,23 +104,46 @@ Os campos do SDK são os da API em *camelCase*.
 | `id` | `MessageId` | Identificador. |
 | `channel` | `string` | Canal usado. |
 | `direction` | `'outbound' \| 'inbound'` | Direção. |
+| `origin` | `'api' \| 'business_app' \| null` | Quem enviou uma mensagem `outbound`. `api` é uma mensagem enviada pela Routa. `business_app` é uma mensagem que a empresa enviou pelo app WhatsApp Business, em um canal em coexistência. É `null` em uma mensagem `inbound`. Vale a partir da 0.3.0. |
 | `from`, `to` | `string` | Endereços em E.164. |
-| `content` | `MessageContent \| null` | Conteúdo, discriminado por `type`. É `null` quando a retenção removeu o conteúdo. Vale a partir da 0.2.0. Na 0.1.0 o tipo é `MessageContent`. |
+| `content` | `MessageContent \| null` | Conteúdo, discriminado por `type`. É `null` quando a retenção removeu o conteúdo. Vale a partir da 0.2.0. |
 | `status` | `MessageStatus` | `accepted`, `sent`, `delivered`, `read` ou `failed`. |
+| `failureCode` | `string \| null` | Motivo da falha. Só tem valor quando `status` é `failed`. Vale a partir da 0.3.0. |
 | `metadata` | `Record<string, string>` | Metadados do cliente. |
 | `acceptedAt` | `string` | ISO 8601, sempre presente. |
 | `sentAt`, `deliveredAt`, `readAt`, `failedAt` | `string \| null` | Momento de cada etapa. |
 | `contentRedactedAt` | `string \| null` | ISO 8601. Quando a retenção removeu o conteúdo, ou `null` enquanto a mensagem ainda o tem. Vale a partir da 0.2.0. |
 | `_replayed` | `boolean` | `true` quando a chamada devolveu o resultado de uma tentativa anterior com a mesma `Idempotency-Key`. |
 
+### Mensagens enviadas pelo app WhatsApp Business
+
+Em um canal em coexistência, a empresa também pode enviar mensagens pelo app WhatsApp Business. A Routa registra essas mensagens como `outbound` com `origin: 'business_app'`. Elas não passam pela Routa para serem enviadas, não consomem a franquia e não aparecem no uso. Use `origin` para separá-las das mensagens que o seu código enviou. Veja [Mensagens](/concepts/messages).
+
+```ts
+for await (const message of routa.messages.list({ direction: 'outbound' })) {
+  if (message.origin === 'business_app') {
+    console.log(message.id, 'enviada pelo app, não pela API')
+  }
+}
+```
+
+### Mensagens que falharam
+
+`failureCode` é o motivo da falha de uma mensagem com `status: 'failed'`, e `null` nos demais casos. O conjunto de códigos é fechado e da Routa, mas a API o publica como `string`, então o SDK não o estreita para uma união. Compare com os códigos que você trata e considere qualquer outro valor como "falhou, motivo desconhecido".
+
+```ts
+const message = await routa.messages.retrieve(messageId)
+
+if (message.status === 'failed') {
+  console.error(message.id, message.failureCode ?? 'desconhecido')
+}
+```
+
 ### Mensagens com conteúdo removido
 
 A Routa remove o conteúdo de uma mensagem depois do período de retenção do plano. A API devolve essa mensagem com `content: null` e `content_redacted_at`. O restante dela continua. Veja [Conteúdo removido pela retenção](/concepts/messages#conteúdo-removido-pela-retenção).
 
-O SDK trata isso de forma diferente em cada versão:
-
-- **Na 0.1.0:** `content` é tipado como `MessageContent`, sem `null`, e `contentRedactedAt` não existe. `messages.retrieve()` e `messages.list()` lançam `TypeError` ao encontrar uma mensagem com o conteúdo removido. Uma só dessas mensagens derruba a listagem inteira. Se você usa a 0.1.0 e tem mensagens mais antigas que a retenção, atualize para a 0.2.0 ou leia as mensagens pela [API REST](/api-reference/endpoint/messages/list).
-- **A partir da 0.2.0:** `content` é `MessageContent | null` e `contentRedactedAt` é `string | null`. Essas mensagens são devolvidas normalmente. Como o tipo de `content` mudou, o código que lê `message.content` sem verificar deixa de compilar. Proteja a leitura:
+Desde a 0.2.0, `content` é `MessageContent | null` e `contentRedactedAt` é `string | null`. Essas mensagens são devolvidas normalmente. Proteja a leitura de `message.content`:
 
 ```ts
 for await (const message of routa.messages.list({ limit: 50 })) {
@@ -133,7 +156,7 @@ for await (const message of routa.messages.list({ limit: 50 })) {
 ```
 
 <Note>
-  **Ainda não suportado em nenhuma versão.** A API devolve `failure_code` em uma mensagem que falhou, mas o SDK não o inclui: `failureCode` não está nos tipos nem no objeto devolvido. Leia o motivo da falha pela [API REST](/api-reference/endpoint/messages/retrieve).
+  Na versão 0.1.0, `messages.retrieve()` e `messages.list()` lançam `TypeError` ao encontrar uma mensagem com o conteúdo removido, e uma só dessas mensagens derruba a listagem inteira. Atualize para a versão atual. Veja [Atualizar para a 0.3.0](/sdk/upgrading).
 </Note>
 
 `MessageContent` cobre também tipos que só chegam em mensagens recebidas ou no histórico (mídia, localização, reação) e `unsupported`, para que ler uma mensagem não lance erro só porque o tipo de conteúdo ainda não é enviável. Isso é independente do `null` descrito acima, que indica conteúdo removido, não um tipo desconhecido.

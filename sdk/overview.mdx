@@ -3,7 +3,7 @@ title: "SDK para Node.js"
 description: "O cliente oficial da Routa para TypeScript e JavaScript: instalação, primeiro envio, requisitos e o que ainda não é suportado."
 ---
 
-O `@routa-chat/sdk` é o SDK oficial da Routa para Node.js. Ele oferece um cliente tipado para enviar mensagens de WhatsApp e receber eventos de entrega, com retentativas, idempotência e verificação de webhooks incluídas.
+O `@routa-chat/sdk` é o SDK oficial da Routa para Node.js. Ele oferece um cliente tipado para enviar mensagens de WhatsApp, submeter templates e receber eventos de entrega, com retentativas, idempotência e verificação de webhooks incluídas. A versão atual é a **0.3.0**. Se você vem da 0.2.0, veja [Atualizar para a 0.3.0](/sdk/upgrading).
 
 <CardGroup cols={3}>
   <Card title="Tipos estritos" icon="shield-check">
@@ -82,7 +82,7 @@ if (!apiKey) {
 const routa = new Routa({ apiKey })
 ```
 
-`new Routa('rt_live_...')` é um atalho para `new Routa({ apiKey: 'rt_live_...' })`. Uma chave vazia lança um erro imediatamente, na construção, e não na primeira requisição.
+`new Routa('rt_live_...')` é um atalho para `new Routa({ apiKey: 'rt_live_...' })`. Uma chave vazia lança um erro imediatamente, na construção, e não na primeira requisição. Uma chave de parceiro (`rt_partner_...`) também é recusada na construção: use o [`RoutaPartner`](/sdk/partner) com ela.
 
 Para verificar uma chave sem efeitos colaterais, chame `routa.whoami()`:
 
@@ -98,23 +98,21 @@ Veja mais em [Chaves de API](/authentication).
 | --- | --- |
 | `routa.messages` | `send`, `retrieve`, `list`, `markRead`. Veja [Mensagens](/sdk/messages). |
 | `routa.webhooks` | `create`, `list`, `retrieve`, `update`, `enable`, `disable`, `rotateSecret`, `constructEvent` e `deliveries`. Veja [Webhooks](/sdk/webhooks). |
-| `routa.events` | `list`. |
-| `routa.templates` | `submit`, `retrieve`, `list`. |
-| `routa.media` | `retrieve`. |
+| `routa.events` | `list`. Veja [Eventos, templates, mídia e uso](/sdk/resources). |
+| `routa.templates` | `submit`, `uploadMedia`, `retrieve`, `list`. Veja [Templates](/sdk/templates). |
+| `routa.media` | `upload`, `retrieve`. Veja [Mídia](/sdk/media). |
 | `routa.usage` | `retrieve`. |
 | `routa.whoami()` | Identidade da chave. |
 
-As demais operações estão em [Eventos, templates, mídia e uso](/sdk/resources).
+A [API de parceiros](/partners/overview) tem um cliente separado, `RoutaPartner`, em `@routa-chat/sdk/partner`. Ele é **experimental**. Veja [Parceiros](/sdk/partner).
 
 ## Ainda não suportado
 
-Conheça estas lacunas antes de construir sobre o SDK. Todas estão disponíveis pela [API REST](/api-reference/introduction):
+Conheça estas lacunas antes de construir sobre o SDK:
 
-- **Envio de mídia (upload).** `routa.media.retrieve(id)` funciona, mas não existe `media.upload()`.
-- **Envio de mídia, localização ou reações.** `messages.send()` aceita apenas `text` e `template`. Mensagens recebidas e históricas desses tipos podem ser lidas, mas não enviadas.
-- **Canais.** Não existe o namespace `routa.channels`. Conecte e gerencie canais no painel e passe o id do canal para `send()`.
-- **Componentes de template.** `templates.submit()` aceita apenas o corpo de texto. Cabeçalho, rodapé e botões dependem da API REST.
-- **Campos e eventos recentes da API.** Os tipos do SDK não incluem `failure_code` em mensagens, o status `failed` de template, `failure_code`, `origin`, `read_only` e `unsupported_components` em templates, nem os eventos `template.failed` e `template.category_changed`. O campo `content_redacted_at` e o `content` anulável de mensagens só existem a partir da versão 0.2.0: na 0.1.0, ler uma mensagem com o conteúdo removido lança `TypeError`. Veja [Mensagens](/sdk/messages) e [Eventos, templates, mídia e uso](/sdk/resources).
+- **Enviar mídia, localização ou reações.** `messages.send()` aceita apenas `text` e `template`. Você pode [enviar um arquivo com `media.upload()`](/sdk/media) e guardar o `id`, mas nenhuma mensagem consegue referenciá-lo ainda. Mensagens recebidas e históricas desses tipos podem ser lidas, mas não enviadas.
+- **Editar, excluir ou sincronizar templates.** O SDK submete, consulta e lista templates. Alterar ou remover um template só é possível no painel: a API não oferece essas operações a uma chave de API.
+- **Canais.** Não existe o namespace `routa.channels`. Conecte e gerencie canais no painel e passe o id do canal para `send()`. Quem usa a [API de parceiros](/sdk/partner) lista e exclui canais desativados com `partner.channels`.
 
 ## Contribuir
 

@@ -10,6 +10,8 @@ Todo erro que a API devolve como resposta HTTP é lançado como `RoutaApiError` 
 | `code` | Código estável do erro, como `channel_inactive`. Veja [Códigos de erro](/errors/error-codes). |
 | `statusCode` | Status HTTP da resposta. |
 | `requestId` | Identificador da requisição. Cite-o ao falar com o suporte. |
+| `type` | Categoria do erro na API, como `billing_error` ou `conflict_error`. É `undefined` quando a resposta não veio da API, como a de um proxy. Vale a partir da 0.3.0. |
+| `details` | Valores legíveis por máquina que alguns erros carregam, como `limit` e `used`. É `undefined` quando o erro não define nenhum. Vale a partir da 0.3.0. |
 | `docUrl` | Link da documentação do erro, quando a API enviou um. |
 | `message` | Texto do erro, em inglês. |
 
@@ -18,14 +20,20 @@ Todo erro que a API devolve como resposta HTTP é lançado como `RoutaApiError` 
 | Status HTTP | Classe | Campos extras |
 | --- | --- | --- |
 | `401` | `RoutaAuthenticationError` | n/d |
+| `402` | `RoutaBillingError` | `limit`, `used` e `resetsAt`, cada um só nos códigos que o definem |
 | `403`, `404`, `422` | `RoutaInvalidRequestError` | `param`: o campo da requisição com problema, quando conhecido |
+| `409` | `RoutaConflictError` | `reason`: o que impede a operação, quando a API enviou |
 | `429` | `RoutaRateLimitError` | `retryAfter`: segundos a esperar, quando o servidor enviou |
-| Qualquer outro (`402`, `409`, `5xx`…) | `RoutaApiError` | n/d |
+| Qualquer outro (`413`, `5xx`…) | `RoutaApiError` | n/d |
+
+`RoutaBillingError` e `RoutaConflictError` existem a partir da 0.3.0. As duas estendem `RoutaApiError`, então um `catch` em `RoutaApiError` continua pegando esses erros.
 
 ```ts
 import {
   RoutaApiError,
   RoutaAuthenticationError,
+  RoutaBillingError,
+  RoutaConflictError,
   RoutaInvalidRequestError,
   RoutaRateLimitError,
 } from '@routa-chat/sdk'
@@ -41,6 +49,10 @@ try {
     // Chave ausente, inválida ou revogada. Tentar de novo não ajuda.
   } else if (error instanceof RoutaRateLimitError) {
     console.warn(`Rate limited; retry in ${error.retryAfter ?? '?'}s`)
+  } else if (error instanceof RoutaBillingError) {
+    console.error(`Billing refusal (${error.code}): used ${error.used ?? '?'} of ${error.limit ?? '?'}`)
+  } else if (error instanceof RoutaConflictError) {
+    console.error(`Conflict (${error.code}): ${error.reason ?? 'n/a'}`)
   } else if (error instanceof RoutaInvalidRequestError) {
     console.error(`Rejected (${error.code}) on field ${error.param ?? 'n/a'}: ${error.message}`)
   } else if (error instanceof RoutaApiError) {
@@ -83,12 +95,47 @@ try {
 ```
 
 <Warning>
-  Um `402` chega como `RoutaApiError`, não como uma subclasse. Trate `message_quota_exceeded` por `code` e não programe retentativas automáticas: esperar não aumenta a franquia. Veja [Planos e franquia](/billing/plans-and-quota).
+  Não programe retentativas automáticas para um `402`: esperar não aumenta a franquia. O SDK também não o retenta. Veja [Planos e franquia](/billing/plans-and-quota).
 </Warning>
+
+## Erros de cobrança
+
+Um `402` chega como `RoutaBillingError`. Use o `code` para distinguir os casos. Os números só existem nos códigos que os definem, e são `undefined` nos demais.
+
+| `code` | Campos preenchidos |
+| --- | --- |
+| `free_messages_exhausted` | `limit` e `used` |
+| `message_quota_exceeded` | `limit`, `used` e `resetsAt` (ISO 8601, quando a franquia reinicia) |
+| `project_limit_exceeded`, `channel_limit_exceeded` | `limit` |
+| `subscription_required`, `payment_failed` | nenhum |
+
+```ts
+import { RoutaBillingError } from '@routa-chat/sdk'
+
+try {
+  await routa.messages.send(params)
+} catch (error) {
+  if (!(error instanceof RoutaBillingError)) throw error
+
+  if (error.code === 'message_quota_exceeded') {
+    // Enfileire do seu lado e volte a enviar depois de `error.resetsAt`.
+    console.warn(`Franquia esgotada: ${error.used}/${error.limit}, reinicia em ${error.resetsAt}`)
+  } else {
+    // A franquia gratuita acabou, ou falta assinatura ou pagamento. Avise o time.
+    console.error(error.code, error.requestId)
+  }
+}
+```
+
+Um projeto de teste não é recusado por cobrança no envio de mensagens.
+
+## Conflitos
+
+Um `409` chega como `RoutaConflictError`. Quando a API informa, `reason` diz o que impede a operação. Hoje isso vale para `project_not_deletable` na [API de parceiros](/sdk/partner), com `has_enabled_channel` ou `last_project`. Os conflitos de idempotência (`idempotency_key_reuse` e `idempotency_in_progress`) também são `409`. Veja [Idempotência](/reliability/idempotency).
 
 ## O que o SDK já retenta
 
-Falhas de rede, `429`, `5xx` e um `409 idempotency_in_progress` são retentados automaticamente, até `maxRetries` vezes. Só o erro final chega ao seu `catch`. `401`, `403`, `404` e `422` nunca são retentados. Veja [Configuração](/sdk/configuration#retentativas).
+Falhas de rede, `429`, `5xx` e um `409 idempotency_in_progress` são retentados automaticamente, até `maxRetries` vezes. Só o erro final chega ao seu `catch`. `401`, `402`, `403`, `404` e `422` nunca são retentados, e nenhum `409` além de `idempotency_in_progress` é retentado. Veja [Configuração](/sdk/configuration#retentativas).
 
 ## O que não é um `RoutaApiError`
 
@@ -107,6 +154,10 @@ try {
   }
 }
 ```
+
+<Info>
+  Um `413` (corpo grande demais em um envio de [mídia](/sdk/media)) chega como um `RoutaApiError` base, com `statusCode` `413`, e não é retentado.
+</Info>
 
 <Info>
   Uma falha de validação de schema (por exemplo, um campo obrigatório ausente) chega como `RoutaInvalidRequestError` com o código `unknown_error`, porque a resposta não vem no formato de erro da Routa. Veja [Erros de validação de schema](/errors/overview).

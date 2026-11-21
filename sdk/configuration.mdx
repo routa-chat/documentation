@@ -19,7 +19,7 @@ const routa = new Routa({
 
 | Opção | Padrão | Descrição |
 | --- | --- | --- |
-| `apiKey` | obrigatório | Credencial `Bearer`. |
+| `apiKey` | obrigatório | Credencial `Bearer`: uma chave de projeto (`rt_live_...` ou `rt_test_...`). Uma chave de parceiro (`rt_partner_...`) lança um erro na construção. |
 | `baseURL` | API de produção da Routa | Origem das requisições. Use para apontar o cliente a outro host, como homologação ou uma instância local: `baseURL: 'http://localhost:3000'`. |
 | `timeout` | `30000` | Timeout de cada tentativa, em milissegundos. |
 | `maxRetries` | `3` | Retentativas depois da primeira tentativa. `0` desativa as retentativas. |
@@ -35,7 +35,7 @@ O cliente retenta:
 - respostas `5xx`;
 - um `409` que significa "uma requisição idêntica ainda está em andamento" (`idempotency_in_progress`).
 
-A espera usa *backoff* exponencial com jitter completo, limitado a 8 segundos, e respeita o header `Retry-After` quando o servidor o envia. Respostas `4xx` como `401`, `403`, `404` e `422` **nunca** são retentadas, porque repeti-las só repetiria a mesma falha. Um `409 idempotency_key_reuse` também não é retentado: é um erro do cliente.
+A espera usa *backoff* exponencial com jitter completo, limitado a 8 segundos, e respeita o header `Retry-After` quando o servidor o envia. Respostas `4xx` como `401`, `402`, `403`, `404` e `422` **nunca** são retentadas, porque repeti-las só repetiria a mesma falha. Um `402` dura até alguém mudar o plano ou o pagamento. Um `409` também não é retentado, exceto `idempotency_in_progress`: `idempotency_key_reuse` e os demais conflitos são erros do cliente.
 
 ## Idempotência
 
@@ -53,8 +53,20 @@ await routa.messages.send({
 Quando uma chamada devolve o resultado de uma tentativa anterior, `message._replayed` é `true`.
 
 <Warning>
-  O servidor deduplica apenas `messages.send()`. Se você precisa evitar retentativas nas outras operações de escrita, configure `maxRetries: 0`. Veja [Idempotência](/reliability/idempotency).
+  O servidor deduplica apenas `messages.send()`. Se você precisa evitar retentativas nas outras operações de escrita, configure `maxRetries: 0`. Isso vale para `templates.submit()`, `templates.uploadMedia()` e `media.upload()`: uma retentativa depois de uma resposta perdida pode criar um segundo template ou guardar o arquivo duas vezes. Veja [Idempotência](/reliability/idempotency).
 </Warning>
+
+## Chave de projeto e chave de parceiro
+
+O `Routa` aceita só chaves de projeto. Passar uma chave de parceiro lança um erro na construção, com uma mensagem que aponta para o `RoutaPartner`. Uma chave de parceiro só é aceita pelas rotas de [parceiros](/partners/partner-keys), e nunca envia mensagens.
+
+```ts
+import { Routa } from '@routa-chat/sdk'
+
+new Routa('rt_partner_...') // lança: use RoutaPartner, de '@routa-chat/sdk/partner'
+```
+
+O `RoutaPartner` aceita as mesmas opções de transporte (`baseURL`, `timeout`, `maxRetries`, `logger` e `fetch`). Veja [Parceiros](/sdk/partner).
 
 ## Logger
 

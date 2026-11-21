@@ -1,0 +1,312 @@
+---
+title: "Parceiros"
+description: "O cliente RoutaPartner, em @routa-chat/sdk/partner: crie um projeto por cliente, emita a chave dele, assine o link de conexão e acompanhe os canais. Experimental."
+---
+
+<Warning>
+  **Experimental.** O `@routa-chat/sdk/partner` pode mudar em uma versão minor até que um parceiro externo o use. A API de parceiros também só existe em planos que a incluem. Quem concede esse acesso é a Routa: sem ele, toda chamada responde `404 partner_api_not_available`.
+</Warning>
+
+Se a sua plataforma revende WhatsApp aos seus próprios clientes, a [API de parceiros](/partners/overview) cria **um projeto por cliente**, ligado ao seu id para ele (`externalRef`). O `RoutaPartner` é o cliente dessa API. Para os conceitos, veja [Parceiros](/partners/overview) e o passo a passo em [Conectar o número de um cliente](/partners/onboarding).
+
+## Importar
+
+O `RoutaPartner` fica em um subcaminho próprio, de propósito. Uma chave de parceiro alcança **todos** os seus clientes, então importá-lo deve ser um ato visível e fácil de achar com `grep`. O `Routa` não carrega nada dele.
+
+```ts
+import { RoutaPartner } from '@routa-chat/sdk/partner'
+
+const partner = new RoutaPartner(process.env['ROUTA_PARTNER_KEY']!)
+```
+
+`new RoutaPartner('rt_partner_...')` é um atalho para `new RoutaPartner({ partnerKey: 'rt_partner_...' })`. As demais opções (`baseURL`, `timeout`, `maxRetries`, `logger` e `fetch`) são as mesmas do `Routa`. Veja [Configuração](/sdk/configuration).
+
+A credencial é `partnerKey`, nunca `apiKey`. O construtor recusa uma chave de projeto (`rt_live_...` ou `rt_test_...`) com uma mensagem que aponta para o `Routa`, e o `Routa` recusa uma chave de parceiro do mesmo modo.
+
+Uma chave de parceiro **nunca envia mensagens**. Depois da conexão, o tráfego do cliente usa a chave do projeto dele, com o `Routa`.
+
+## O que uma pessoa faz uma vez, no painel
+
+A API não faz isto por você, de propósito: uma chave vazada não pode substituir a si mesma. No painel, abra **Configurações** (no painel, **Settings**) e depois a aba **Partner**:
+
+1. Confirme que o plano inclui a API de parceiros.
+2. Crie o perfil de parceiro. Você recebe o seu id `ptn_...` e o **segredo de assinatura** (`rt_psign_...`), mostrado uma única vez.
+3. Registre as **origens de redirecionamento** para onde seus links podem devolver o cliente.
+4. Emita uma **chave de parceiro** (`rt_partner_...`), mostrada uma única vez.
+
+Veja [Chaves de parceiro](/partners/partner-keys) para os escopos.
+
+## Recursos
+
+| Namespace | Operações | Escopo |
+| --- | --- | --- |
+| `partner.projects` | `create`, `list`, `retrieve`, `update`, `delete` | `projects:write`, `projects:read` e `projects:delete` |
+| `partner.projects.apiKeys` | `create`, `rotate`, `revoke` | `api_keys:write` |
+| `partner.channels` | `list`, `delete` | `projects:read` e `channels:write` |
+| `partner.webhook` | `retrieve`, `set`, `rotateSecret` | `webhooks:write` |
+| `buildOnboardingLink()` | Monta e assina o link de conexão. Não faz requisição. | n/d |
+
+Uma chave nova tem só `projects:read` e `projects:write`. Os escopos `api_keys:write`, `webhooks:write`, `channels:write` e `projects:delete` são opcionais: peça cada um de propósito. O `webhooks:write` é necessário até para ler o webhook, porque não existe um escopo só de leitura.
+
+## Do cliente ao número conectado
+
+O ciclo: criar o projeto do cliente, emitir a chave dele, assinar o link que o cliente abre para conectar o número, confirmar pela API e enviar com a chave do projeto.
+
+```ts
+import { Routa } from '@routa-chat/sdk'
+import { buildOnboardingLink, RoutaPartner } from '@routa-chat/sdk/partner'
+
+function required(name: string): string {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(`${name} is not set`)
+  }
+  return value
+}
+
+const partner = new RoutaPartner(required('ROUTA_PARTNER_KEY'))
+
+// 1 e 2: o projeto do cliente e a chave dele. Rode no seu servidor,
+// uma vez por cliente, quando ele se cadastra.
+async function provision(customerId: string, customerName: string) {
+  // `customerId` é o SEU id para o cliente: ele vira o `externalRef` do projeto.
+  // Repetir a chamada devolve o mesmo projeto (`created` é false).
+  const { project } = await partner.projects.create({
+    name: customerName,
+    externalRef: customerId,
+  })
+
+  // Precisa do escopo `api_keys:write`. O segredo volta UMA vez: guarde-o
+  // agora, no seu cofre de segredos.
+  const key = await partner.projects.apiKeys.create(project.id, {
+    name: customerName,
+    scopes: ['messages:write', 'messages:read'], // o menor conjunto que funciona
+  })
+
+  return { projectId: project.id, projectApiKey: key.secret }
+}
+
+// 3: assine o link QUANDO O CLIENTE CLICAR (ele vale por dez minutos), no seu
+// servidor. O segredo de assinatura nunca sai dele.
+async function connectLink(customerId: string): Promise<string> {
+  return buildOnboardingLink({
+    partnerId: required('ROUTA_PARTNER_ID'), // ptn_...
+    signingSecret: required('ROUTA_PARTNER_SIGNING_SECRET'),
+    externalRef: customerId,
+    redirectUrl: 'https://app.exemplo.com/conectado', // uma origem que você registrou
+    state: 'um-valor-que-voce-confere-com-a-sessao-do-cliente',
+  })
+}
+
+// 4: confirme pela API. O redirecionamento para o seu `redirectUrl` é só uma
+// dica, nunca uma prova: qualquer um pode forjá-lo. Leia o projeto.
+async function isConnected(customerId: string): Promise<boolean> {
+  const found = await partner.projects.list({ externalRef: customerId }).page()
+  const project = found.data[0]
+  if (!project) {
+    return false
+  }
+  const detail = await partner.projects.retrieve(project.id)
+  return detail.channels.some(channel => channel.status === 'active')
+}
+
+// 5: daqui em diante o tráfego do cliente usa a chave do projeto, não a de parceiro.
+function forCustomer(projectApiKey: string): Routa {
+  return new Routa(projectApiKey)
+}
+```
+
+Abra o link com `window.open` na sua página, ou em uma nova aba. A página que abre é da Routa, e a janela da Meta não roda em um iframe. Quando a tentativa termina, o navegador do cliente volta para o seu `redirectUrl` com o seu `state` inalterado, mais `status`, `project_id` e `channel_id` (ou `error`). Confira o `state` contra a sessão do cliente e confirme como no passo 4. Veja [Link de conexão assinado](/partners/signed-link).
+
+Não existe um método "confirmar canal". Confirmar é uma leitura, como no passo 4. Sem um webhook, consulte `projects.retrieve()` (ou `channels.list({ externalRef })`) com um intervalo razoável e um prazo: um cliente pode nunca terminar.
+
+## Projetos
+
+```ts
+const { project, created } = await partner.projects.create({
+  name: 'Loja do Zé',
+  externalRef: 'lead_123',
+})
+```
+
+`projects.create()` devolve `{ project, created }`. `created` é `true` quando a chamada criou o projeto (`201`) e `false` quando aquele `externalRef` já tinha um e ele foi devolvido como estava (`200`). Nesse segundo caso, o `name` enviado é ignorado.
+
+O `externalRef` é o **seu** id para o cliente: de 1 a 128 caracteres entre `A-Z a-z 0-9 . _ : -`. Nunca use um e-mail, um telefone ou um nome. Ele é único na sua organização e definido uma vez.
+
+| Método | O que faz |
+| --- | --- |
+| `create({ name, externalRef })` | Cria o projeto, ou devolve o que já tem esse `externalRef`. |
+| `list({ externalRef?, hasChannel?, limit?, cursor? })` | Lista os projetos, com [paginação](/sdk/pagination). `hasChannel: false` acha os que nunca terminaram o link. |
+| `retrieve(id)` | Lê um projeto **com os canais dele**. É assim que você confirma uma conexão. |
+| `update(id, { name })` | Renomeia. O `externalRef` não muda. |
+| `delete(id)` | Exclui o projeto e tudo o que ele tem. Precisa de `projects:delete`. |
+
+`hasChannel: false` exclui um projeto que só tem canais `disabled`, porque ele tem um canal de algum status.
+
+### Excluir um projeto
+
+A exclusão devolve o espaço do limite de projetos do plano. Ela apaga mensagens, templates, eventos, contatos, chaves, endpoints de webhook, mídia e os canais desativados do projeto, e os números deles ficam livres de novo. Nada muda no WhatsApp.
+
+`delete()` devolve `{ status: 'deleted' }` quando o projeto sumiu, ou `{ status: 'deleting', projectId }` quando ele era grande e só uma parte foi apagada. Nesse caso, chame de novo até receber `deleted`.
+
+```ts
+let result = await partner.projects.delete(projectId)
+while (result.status === 'deleting') {
+  result = await partner.projects.delete(result.projectId)
+}
+```
+
+Um projeto com um canal que não está `disabled`, ou o último projeto da organização, responde `409 project_not_deletable` como `RoutaConflictError`, e o `reason` diz o motivo: `has_enabled_channel` ou `last_project`.
+
+## Chaves de projeto
+
+`partner.projects.apiKeys` emite, rotaciona e revoga a chave de um projeto. Precisa do escopo `api_keys:write`.
+
+```ts
+const key = await partner.projects.apiKeys.create(project.id, {
+  name: 'Backend do cliente 123',
+  scopes: ['messages:write', 'messages:read'],
+  expiresAt: new Date('2027-06-01'),
+  ipAllowlist: ['203.0.113.10'],
+})
+
+console.log(key.secret) // aparece UMA vez
+```
+
+| Parâmetro | Descrição |
+| --- | --- |
+| `scopes` | Os escopos da chave. O menor conjunto que funciona. A API ignora um valor que não conhece, então um escopo escrito errado é descartado, e não recusado. |
+| `name` | Um rótulo, de até 80 caracteres. |
+| `expiresAt` | Quando a chave deixa de funcionar: um `Date` ou uma string ISO 8601. |
+| `ipAllowlist` | Endereços de onde a chave pode ser usada. Vazio ou ausente significa qualquer um. |
+
+`rotate(projectId, keyId)` emite uma substituta com os mesmos escopos, validade e lista de endereços, e devolve o segredo dela, uma vez. A original continua funcionando até você chamar `revoke(projectId, keyId)`, então dá para trocar o tráfego antes de cortá-la.
+
+O segredo só vem nos tipos `ProjectApiKeyWithSecret`, de `create` e `rotate`. Leituras e `revoke` devolvem `ProjectApiKey`, sem segredo.
+
+<Warning>
+  `apiKeys.create()` e `apiKeys.rotate()` não são seguras para retentar. A API ignora o `Idempotency-Key` nelas, e o cliente retenta uma requisição cuja resposta não chegou: uma resposta perdida pode deixar duas chaves emitidas, ou rotacionar duas vezes e deixar você com um segredo que já foi trocado. Se isso importa mais do que atravessar uma falha de rede, use um cliente com `maxRetries: 0` para essas chamadas: `new RoutaPartner({ partnerKey, maxRetries: 0 })`. Criar um *projeto* é diferente: é idempotente pelo `externalRef`.
+</Warning>
+
+## Canais
+
+`partner.channels.list()` lista os canais de todos os projetos que você criou, em qualquer status, cada um com o `externalRef` do projeto. Responde "quem tem um número e quem tem um problema" em uma chamada.
+
+```ts
+for await (const channel of partner.channels.list({ status: 'disabled' })) {
+  console.log(channel.externalRef, channel.address, channel.disconnectionReason)
+}
+```
+
+| Filtro | Descrição |
+| --- | --- |
+| `status` | `pending`, `active`, `degraded` ou `disabled`. |
+| `projectId` | Só os canais deste projeto. |
+| `externalRef` | Só os canais do projeto com este `externalRef`. |
+
+Os filtros se combinam. Um projeto ou um `externalRef` que ninguém tem dá uma página vazia, não um erro. Cada `PartnerChannel` tem `id`, `projectId`, `externalRef`, `address` (E.164), `status`, `statusReasonCode`, `connectionMode` (`cloud_api` ou `coexistence`), `disconnectionReason` e `createdAt`.
+
+`partner.channels.delete(projectId, channelId)` exclui um canal **desativado** e libera o número dele. Isso serve a um cliente que se desconectou no app WhatsApp Business e segura o número até ali. Precisa do escopo `channels:write`. A exclusão remove o canal, a credencial e os templates dele. Mensagens, uso e eventos continuam citando o canal, e nada muda no provedor. Um canal em qualquer outro status responde `409 channel_not_disabled`.
+
+## Receber os eventos de todos os clientes
+
+`partner.webhook` gerencia o **único webhook da organização**, que recebe os eventos de todos os seus clientes. Cada evento traz `projectId` e `externalRef`, então você roteia pelo seu próprio id. Veja [Webhook de parceiro](/partners/webhook).
+
+```ts
+const { webhook, secret } = await partner.webhook.set({
+  url: 'https://crm.exemplo.com/routa',
+  subscribedTypes: ['message.*', 'channel.status_changed'],
+})
+
+if (secret) {
+  // A primeira chamada cria o webhook e devolve o segredo, uma vez.
+}
+```
+
+`set()` cria o webhook na primeira vez, com o segredo de assinatura (que aparece uma única vez), e o substitui e reativa nas seguintes, sem um segredo novo. Por isso `secret` é opcional no resultado. `subscribedTypes` precisa ter pelo menos um tipo. `retrieve()` devolve `404 webhook_endpoint_not_found` até a primeira chamada de `set()`. `rotateSecret()` emite um segredo novo e o devolve uma vez. O anterior continua assinando por 24 horas.
+
+O `Webhook` é o mesmo de `routa.webhooks.*`. A verificação da assinatura também é a mesma, e `partner.webhook.constructEvent()` a faz com o `RoutaPartner` que você já tem. Ela roda localmente, sem chamada de rede, e devolve o mesmo `RoutaEvent`:
+
+```ts
+const event = await partner.webhook.constructEvent(
+  rawBody,
+  request.headers.get('routa-signature'),
+  process.env['ROUTA_PARTNER_WEBHOOK_SECRET']!
+)
+
+if ('id' in event) {
+  console.log(event.projectId, event.externalRef, event.type)
+}
+```
+
+Durante a [rotação do segredo](/partners/webhook#rotacione-o-segredo), passe os dois segredos em uma lista: `[novoSegredo, segredoAnterior]`.
+
+<Note>
+  `partner.webhook.constructEvent()` chega depois da 0.3.0. Na 0.3.0, a verificação só existe em `routa.webhooks.constructEvent()`, que exige uma instância de `Routa`.
+</Note>
+
+Veja [Webhooks](/sdk/webhooks) para o `rawBody` e a rotação de segredo. Um endpoint com muitos clientes é o limite de todos eles: responda rápido e enfileire o trabalho do seu lado.
+
+## O link de conexão
+
+`buildOnboardingLink()` monta e assina o link que o cliente abre para conectar o número. É uma função pura: não faz requisição e usa só Web Crypto.
+
+```ts
+import { buildOnboardingLink } from '@routa-chat/sdk/partner'
+
+const link = await buildOnboardingLink({
+  partnerId: 'ptn_...',
+  signingSecret: process.env['ROUTA_PARTNER_SIGNING_SECRET']!,
+  externalRef: 'lead_123',
+  name: 'Loja do Zé',
+  redirectUrl: 'https://app.exemplo.com/conectado',
+  state: 'valor-opaco',
+})
+```
+
+| Parâmetro | Obrigatório | Descrição |
+| --- | --- | --- |
+| `partnerId` | sim | O seu id `ptn_...`, mostrado no painel. |
+| `signingSecret` | sim | O segredo de assinatura (`rt_psign_...`). **Não** é a chave de parceiro. |
+| `externalRef` | sim | O seu id para o cliente. |
+| `name` | não | O nome do projeto, de até 200 caracteres. Sem ele, o padrão é o `externalRef`. |
+| `redirectUrl` | não | `https://...`, em uma origem registrada no painel, de até 2048 caracteres. |
+| `state` | não | Opaco, de até 256 caracteres. Volta ao seu `redirectUrl` inalterado. |
+| `now` | não | O instante da assinatura. Só para reproduzir um link em um teste. |
+| `origin` | não | A origem da página de conexão. Só para apontar a uma instância local. |
+
+A API responde a todo link ruim com a mesma página "este link não é válido", sem dizer o motivo. Por isso a função valida a entrada e lança um `Error` que nomeia o parâmetro com problema: é o único lugar em que você descobre por quê. Ela não consegue conferir o que está do lado da Routa: o segredo de assinatura em uso (uma rotação mantém o antigo por 24 horas), se a origem do `redirectUrl` está registrada e se o plano ainda tem a API de parceiros.
+
+<Warning>
+  Assine o link **quando o cliente clicar**. Ele vale por 10 minutos, então um link assinado quando você enviou um e-mail já expirou quando o cliente o abre. Hospede um redirecionador seu que assine no clique. O link só deve ser montado no seu servidor: o segredo de assinatura nunca pode ir para o navegador.
+</Warning>
+
+## Erros
+
+O `RoutaPartner` lança as mesmas classes que o `Routa`, a partir de uma única cópia, então `error instanceof RoutaApiError`, importado de `@routa-chat/sdk`, vale em ESM e em CommonJS.
+
+| Resposta | Classe | Quando |
+| --- | --- | --- |
+| `401` `partner_key_invalid` | `RoutaAuthenticationError` | A chave é ausente, desconhecida, revogada, expirada ou vem de um endereço fora da lista. Uma chave de projeto também recebe este erro. |
+| `404` `partner_api_not_available` | `RoutaInvalidRequestError` | O plano da organização não tem a API de parceiros, ou deixou de ter. |
+| `403` `insufficient_scope` | `RoutaInvalidRequestError` | A chave não tem o escopo que a chamada exige. |
+| `402` `project_limit_exceeded` | `RoutaBillingError` | O plano não permite mais projetos. `limit` traz o limite. |
+| `409` `project_not_deletable`, `channel_not_disabled` | `RoutaConflictError` | A exclusão não pode acontecer agora. `reason` explica o primeiro. |
+| `422` `invalid_external_ref`, `external_ref_immutable`, `invalid_project_name`, `invalid_webhook_url`, `invalid_subscribed_types` | `RoutaInvalidRequestError` | Um parâmetro inválido. |
+| `429` | `RoutaRateLimitError` | O limite é por organização: uma fila só para todas as rotas de `/v1/partner/*`. |
+
+Confira `error.code`, não só a classe. Veja [Tratamento de erros](/sdk/error-handling) e [Códigos de erro](/errors/error-codes).
+
+## Segurança
+
+Trate `ROUTA_PARTNER_KEY` como uma credencial de administrador.
+
+- **O que uma chave vazada alcança.** Com o escopo `api_keys:write`, ela emite uma chave de projeto com `messages:write` para *qualquer* projeto da sua organização, então alcança o envio de **todos os seus clientes**. Esse é o preço de provisionar por API. Sem o escopo, ela ainda lê e cria projetos. Ela nunca lê um segredo que já existe (as chaves aparecem uma vez), nunca envia uma mensagem e nunca cria nem altera uma chave de parceiro, um segredo de assinatura ou uma origem de redirecionamento. Tudo o que é feito com ela fica na auditoria, com a chave como autora, e você a revoga na hora no painel.
+- **Dê o menor escopo.** Para um trabalho que precisa de um escopo só, como um relatório que lê projetos, emita uma chave que tenha só ele.
+- **Restrinja aos seus servidores e dê uma validade.** Use `ipAllowlist` com os endereços de onde seus servidores chamam, defina uma validade e rotacione a chave de tempos em tempos. O mesmo vale para as chaves que você emite com `apiKeys.create()`.
+- **Nunca no navegador.** A chave de parceiro e o segredo de assinatura são do seu servidor, nunca de uma página, de um app móvel, de um *bundle* de front-end ou de um repositório público. O navegador só recebe o link pronto.
+- **Fora dos logs e do controle de versão.** Leia do ambiente ou de um cofre de segredos. O cliente nunca escreve a chave em um log, em uma mensagem de erro nem em uma chamada de `logger`.
+
+## Referência da API
+
+Cada método corresponde a um endpoint da [API de parceiros](/api-reference/endpoint/partner/create-project). Todas as rotas são autenticadas por uma chave de parceiro, e nenhuma lê o `Idempotency-Key`.

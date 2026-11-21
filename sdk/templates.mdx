@@ -1,0 +1,205 @@
+---
+title: "Templates"
+description: "Submeta templates com cabeçalho, rodapé e botões, envie o arquivo de um cabeçalho de mídia e acompanhe a aprovação com o SDK."
+---
+
+`routa.templates` submete templates para aprovação, envia o arquivo de um cabeçalho de mídia, consulta e lista templates. Para o ciclo de vida, os status e as regras do WhatsApp, veja [Templates](/concepts/templates).
+
+| Método | Endpoint | Escopo |
+| --- | --- | --- |
+| `submit(params)` | [`POST /v1/templates`](/api-reference/endpoint/templates/create) | `templates:write` |
+| `uploadMedia({ file, contentType })` | [`POST /v1/templates/media`](/api-reference/endpoint/templates/upload-media) | `templates:write` |
+| `retrieve(id)` | [`GET /v1/templates/{id}`](/api-reference/endpoint/templates/retrieve) | `templates:read` |
+| `list(params)` | [`GET /v1/templates`](/api-reference/endpoint/templates/list) | `templates:read` |
+
+## Submeter um template
+
+Um template só com corpo precisa de `channel`, `name`, `language`, `category` e `bodyText`.
+
+```ts
+const template = await routa.templates.submit({
+  channel: 'chan_...',
+  name: 'confirmacao_pedido',
+  language: 'pt_BR',
+  category: 'utility',
+  bodyText: 'Olá {{1}}! Seu pedido {{2}} foi confirmado.',
+})
+
+console.log(template.id, template.status) // "tmpl_...", "submitted"
+```
+
+A resposta traz `status: 'submitted'`, **não** `approved`. A Routa registra o template primeiro e o envia ao provedor depois, e o provedor decide no tempo dele. Acompanhe o resultado pelos eventos `template.*`, por [webhooks](/sdk/webhooks) ou por `routa.events.list()`.
+
+## Componentes
+
+`components` aceita um cabeçalho, um rodapé e até 10 botões. Deixe `components` de fora para um template só com corpo.
+
+```ts
+const template = await routa.templates.submit({
+  channel: 'chan_...',
+  name: 'pedido_enviado',
+  language: 'pt_BR',
+  category: 'utility',
+  bodyText: 'Seu pedido {{1}} foi enviado.',
+  components: {
+    header: { kind: 'text', text: 'Pedido a caminho' },
+    footer: { text: 'Responda SAIR para não receber mais' },
+    buttons: [
+      { kind: 'url', text: 'Acompanhar', url: 'https://exemplo.com/pedidos/{{1}}' },
+      { kind: 'phone_number', text: 'Ligar', phoneNumber: '+5581999999999' },
+    ],
+  },
+})
+```
+
+Cada parte é uma união por `kind`. Por isso, um botão `url` sem `url`, ou um cabeçalho `media` sem `mediaId`, não compila.
+
+| Parte | Formato |
+| --- | --- |
+| Cabeçalho de texto | `{ kind: 'text', text }` |
+| Cabeçalho de mídia | `{ kind: 'media', mediaId }` |
+| Rodapé | `{ text }` |
+| Botão de resposta rápida | `{ kind: 'quick_reply', text }` |
+| Botão de telefone | `{ kind: 'phone_number', text, phoneNumber }` |
+| Botão de URL | `{ kind: 'url', text, url }` |
+
+O SDK confere só o **formato**. Tamanhos, a quantidade de botões, os formatos de URL e de telefone e as regras do WhatsApp são da API, que responde `422` com o campo com problema. Veja as regras em [Templates](/concepts/templates).
+
+## Cabeçalho de imagem, vídeo ou documento
+
+Envie o arquivo com `uploadMedia()` e passe o `id` retornado como `mediaId`:
+
+```ts
+import { readFile } from 'node:fs/promises'
+
+const media = await routa.templates.uploadMedia({
+  file: await readFile('./cabecalho.png'), // um Uint8Array (um Buffer é um) ou um Blob
+  contentType: 'image/png',
+})
+
+const template = await routa.templates.submit({
+  channel: 'chan_...',
+  name: 'promocao_semana',
+  language: 'pt_BR',
+  category: 'marketing',
+  bodyText: 'Confira as ofertas da semana, {{1}}!',
+  components: {
+    header: { kind: 'media', mediaId: media.id },
+  },
+})
+```
+
+O envio é síncrono: o `TemplateMedia` já pode ser usado. A API deriva o `format` do `contentType`.
+
+| `contentType` | `format` | Tamanho máximo |
+| --- | --- | --- |
+| `image/jpeg`, `image/png` | `image` | 5 MiB |
+| `video/mp4` | `video` | 16 MiB |
+| `application/pdf` | `document` | 100 MiB |
+
+- O `contentType` vai como o `Content-Type` da requisição. O SDK **não** o lê do `type` de um `Blob`.
+- Os primeiros bytes do arquivo precisam bater com o `contentType`.
+- O `contentType` é comparado de forma exata: `image/png; charset=binary` é recusado.
+- Ao contrário de `media.upload()`, não existe o modo `sourceUrl`.
+
+### O `TemplateMediaId`
+
+O `media.id` é um `TemplateMediaId` (`tmedia_...`), um tipo *branded* próprio. Um `MediaId` de [`media.upload()`](/sdk/media) ou uma `string` comum não serve como `mediaId`: o compilador recusa. É um arquivo de outro tipo, e só um cabeçalho de template pode usá-lo.
+
+Em um template que você lê, o `components.header.media_id` já é um `TemplateMediaId`, então pode ser passado de volta como `mediaId`.
+
+## Ler um template
+
+```ts
+import { toTemplateId } from '@routa-chat/sdk'
+
+const template = await routa.templates.retrieve(toTemplateId('tmpl_...'))
+
+console.log(template.bodyText, template.components?.buttons?.length ?? 0)
+```
+
+`components` **não existe** em um template só com corpo: ele é omitido, e não um objeto vazio. Proteja a leitura com `template.components?.`.
+
+| Campo | Tipo | Descrição |
+| --- | --- | --- |
+| `bodyText` | `string \| null` | O corpo, com `{{1}}`, `{{2}}`. É `null` só em um template importado que a Routa não reproduz (`readOnly`). |
+| `components` | `TemplateComponents` | Cabeçalho, rodapé e botões. Ausente quando não há nenhum. |
+| `status` | `TemplateStatus` | `draft`, `submitted`, `pending`, `approved`, `rejected`, `paused`, `disabled` ou `failed`. |
+| `rejectionReason` | `TemplateRejectionReason \| null` | Só quando o status é `rejected`. |
+| `failureCode` | `TemplateFailureCode \| null` | Só quando o status é `failed`. Um conjunto fechado de valores da Routa. |
+| `failureDetail` | `string \| null` | A frase do provedor sobre a recusa, quando ele deu uma. É texto para uma pessoa: nunca compare com ele, use `failureCode`. |
+| `deletionRequested` | `boolean` | `true` enquanto a exclusão pedida no painel não terminou. O template não pode ser enviado nesse intervalo. |
+| `deletionFailureDetail` | `string \| null` | Por que a última exclusão terminou sem excluir. |
+| `origin` | `'routa' \| 'provider'` | `provider` é um template que já existia no WhatsApp e foi importado. |
+| `readOnly` | `boolean` | `true` em um template importado que a Routa não reproduz. Uma mensagem que o usa recebe `422 template_not_sendable`. |
+| `unsupportedComponents` | `TemplateUnsupportedComponent[]` | Por que o template é `readOnly`. Vazio nos demais. |
+
+Os campos novos da 0.3.0 são `bodyText`, `components`, `failureCode`, `failureDetail`, `deletionRequested`, `deletionFailureDetail`, `origin`, `readOnly` e `unsupportedComponents`.
+
+### Tratar o status
+
+```ts
+switch (template.status) {
+  case 'approved':
+    // já pode ser enviado
+    break
+  case 'rejected':
+    console.log(template.rejectionReason)
+    break
+  case 'failed':
+    // A Routa não conseguiu submeter o template ao provedor.
+    console.error(template.failureCode, template.failureDetail)
+    break
+  default:
+    // draft, submitted, pending, paused, disabled
+    break
+}
+```
+
+Veja os valores de `failureCode` e o que cada um significa em [Quando a submissão falha](/concepts/templates#quando-a-submissão-falha).
+
+## Erros
+
+A API recusa uma submissão inválida com um destes erros. O SDK os lança como `RoutaInvalidRequestError`, com o campo `param` quando a API informa.
+
+| Status | `code` | `param` |
+| --- | --- | --- |
+| `422` | `template_name_invalid` | `name` |
+| `422` | `template_components_invalid` | `body_text`, `components.header`, `components.footer` ou `components.buttons` |
+| `422` | `template_variables_invalid` | n/d |
+| `422` | `capability_unsupported` (o canal não envia templates) | n/d |
+| `422` | `template_media_invalid` (no `uploadMedia()`) | n/d |
+| `404` | `template_media_not_found`: o `mediaId` não existe **neste projeto** | n/d |
+| `404` | `channel_not_found` | n/d |
+| `403` | `insufficient_scope`: a chave não tem `templates:write` | n/d |
+
+- O `param` de `template_components_invalid` nomeia o **componente**, não o item dentro dele. Não existe algo como `components.buttons.0.url`. A `message` diz o que está errado.
+- A API reporta o primeiro problema que encontra, então corrigir um pode revelar o próximo.
+- A API confere o canal antes da mídia: um canal desconhecido esconde um `mediaId` inválido.
+- Um arquivo com mais de 100 MiB recebe `413 payload_too_large`, como um `RoutaApiError` base. Ele não é retentado.
+
+```ts
+import { RoutaInvalidRequestError } from '@routa-chat/sdk'
+
+try {
+  await routa.templates.submit(params)
+} catch (error) {
+  if (error instanceof RoutaInvalidRequestError && error.code === 'template_components_invalid') {
+    console.error(`Corrija ${error.param}: ${error.message}`)
+  } else {
+    throw error
+  }
+}
+```
+
+## Não é idempotente
+
+`POST /v1/templates` e `POST /v1/templates/media` não leem `Idempotency-Key`, então o SDK não envia uma. O cliente ainda retenta uma falha de rede ou um `5xx`. Se a primeira tentativa já tinha sido registrada e só a resposta se perdeu, a retentativa cria um segundo template com o mesmo nome (com outro `tmpl_...`), que o provedor pode recusar como duplicado. No upload, ela guarda o arquivo duas vezes.
+
+<Warning>
+  Configure `maxRetries: 0` no cliente se um duplicado importa mais do que a resistência a uma conexão instável. Depois de um erro cuja resposta você não leu, use `templates.list()` antes de submeter de novo.
+</Warning>
+
+## O que o SDK não faz
+
+O SDK não **edita**, não **exclui** e não **sincroniza** templates. Essas operações existem só no painel, e a API não as oferece a uma chave de API. Um template `failed` ou `rejected` pode ser editado e reenviado no painel. Pelo SDK, crie um novo com `submit()`. Quando o painel edita ou exclui um template, você recebe `template.updated` ou `template.deleted`.

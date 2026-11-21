@@ -50,13 +50,16 @@ function lookUp(id: string) {
 | `EventId` | `evt_` | `isEventId` | `toEventId` |
 | `TemplateId` | `tmpl_` | `isTemplateId` | `toTemplateId` |
 | `MediaId` | `med_` | `isMediaId` | `toMediaId` |
+| `TemplateMediaId` | `tmedia_` | `isTemplateMediaId` | `toTemplateMediaId` |
 | `WebhookId` | `whe_` | `isWebhookId` | `toWebhookId` |
 | `WebhookDeliveryId` | `whd_` | `isWebhookDeliveryId` | `toWebhookDeliveryId` |
+
+O `TemplateMediaId` é diferente do `MediaId`: o primeiro identifica o arquivo de um cabeçalho de template, e o segundo, uma mídia de mensagem. Um não é atribuível ao outro. Os ids da [API de parceiros](/sdk/partner), como `PartnerProjectId` (`proj_`) e `ApiKeyId` (`key_`), vêm de `@routa-chat/sdk/partner`.
 
 Para outros prefixos, existem os genéricos `Id<Prefix>`, `isPrefixedId` e `toId`.
 
 <Note>
-  O campo `channel` de `messages.send()` e de `templates.submit()` aceita uma `string` comum. Já os ids de recurso em `retrieve` exigem o tipo *branded*.
+  O campo `channel` de `messages.send()` e de `templates.submit()` aceita uma `string` comum. Já os ids de recurso em `retrieve` exigem o tipo *branded*. A exceção é `mediaId` em um cabeçalho de template, que também exige um `TemplateMediaId`.
 </Note>
 
 ## Tipos exportados
@@ -67,6 +70,7 @@ Os tipos principais podem ser importados do pacote:
 import type {
   Message,
   MessageContent,
+  MessageOrigin,
   MessageStatus,
   RoutaEvent,
   EventType,
@@ -81,6 +85,39 @@ import type {
   Page,
 } from '@routa-chat/sdk'
 ```
+
+Os tipos de templates e de mídia, e os erros, também são exportados:
+
+```ts
+import type {
+  // O que você lê de um template
+  TemplateCategory,
+  TemplateComponents,
+  TemplateHeader,
+  TemplateFooter,
+  TemplateButton,
+  TemplateHeaderMediaFormat,
+  TemplateFailureCode,
+  TemplateOrigin,
+  TemplateUnsupportedComponent,
+  // O que você envia em templates.submit()
+  SubmitTemplateParams,
+  TemplateComponentsInput,
+  TemplateHeaderInput,
+  TemplateFooterInput,
+  TemplateButtonInput,
+  // Arquivos
+  TemplateMedia,
+  UploadTemplateMediaParams,
+  UploadMediaParams,
+  UploadMediaFileParams,
+  UploadMediaUrlParams,
+  // Detalhes de erro
+  RoutaErrorDetailValues,
+} from '@routa-chat/sdk'
+```
+
+Os tipos que descrevem um template **lido** (`TemplateHeader`, `TemplateFooter`, `TemplateButton`, `TemplateComponents`) mantêm o *snake_case* da API (`media_id`, `phone_number`). Os tipos de **entrada** (`TemplateHeaderInput` e os demais `*Input`) usam *camelCase* (`mediaId`, `phoneNumber`). Veja [Templates](/sdk/templates).
 
 ### Conteúdo da mensagem
 
@@ -115,8 +152,8 @@ function describe(message: Message): string {
 
 ### Eventos
 
-`RoutaEvent` é uma união por `type`, com um último membro genérico para tipos que a sua versão do SDK ainda não conhece. Veja [Webhooks no SDK](/sdk/webhooks).
+`RoutaEvent` é uma união por `type`, com um último membro genérico para tipos que a sua versão do SDK ainda não conhece. `EventType` tem 17 membros na 0.3.0 e todo evento conhecido tem `externalRef`. Veja [Webhooks no SDK](/sdk/webhooks).
 
 ## Convenções de nomes
 
-O SDK expõe os campos da API em *camelCase* (`deliveredAt`, `nextCursor`), exceto dentro de `content` de mensagens e de `data` de eventos, que preservam o formato da API (`media_id`, `template_id`, `body_parameters`).
+O SDK expõe os campos da API em *camelCase* (`deliveredAt`, `nextCursor`), exceto em três lugares que preservam o formato da API: `content` de mensagens (`media_id`, `template_id`, `body_parameters`), `data` de eventos e `components` de um template lido (`media_id`, `phone_number`).

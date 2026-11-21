@@ -90,11 +90,65 @@ const event = await routa.webhooks.constructEvent(rawBody, header, [newSecret, o
 
 ### Tipos de evento
 
-O SDK conhece `message.accepted`, `message.sent`, `message.delivered`, `message.read`, `message.failed`, `message.received`, `channel.status_changed` e os eventos `template.submitted`, `template.pending`, `template.approved`, `template.rejected`, `template.paused` e `template.disabled`. `template.failed` e `template.category_changed` ainda não estão nos tipos. Um tipo introduzido depois da sua versão instalada ainda é interpretado: chega como um evento genérico, com `type` do tipo `string` e `data` como `unknown`, e é seguro ignorá-lo.
+A partir da 0.3.0, o SDK conhece 17 tipos de evento:
+
+| Grupo | Tipos |
+| --- | --- |
+| Mensagens | `message.accepted`, `message.sent`, `message.delivered`, `message.read`, `message.failed`, `message.received` |
+| Canais | `channel.status_changed` |
+| Templates | `template.submitted`, `template.pending`, `template.approved`, `template.rejected`, `template.paused`, `template.disabled`, `template.failed`, `template.category_changed`, `template.updated`, `template.deleted` |
+
+Veja o conteúdo de `data` de cada tipo em [Tipos de evento](/webhooks/event-types).
+
+Um tipo introduzido depois da sua versão instalada ainda é interpretado: chega como um evento genérico, com `type` do tipo `string` e `data` como `unknown`, e é seguro ignorá-lo.
 
 <Info>
   Como o último membro da união `RoutaEvent` tem `type: string`, um `switch (event.type)` sozinho não estreita os outros campos. Verifique `'id' in event` antes para obter o envelope completo.
 </Info>
+
+### O envelope do evento
+
+Todo evento conhecido tem estes campos, em *camelCase*:
+
+| Campo | Tipo | Descrição |
+| --- | --- | --- |
+| `id` | `EventId` | Identificador do evento. |
+| `type` | `EventType` | Tipo do evento. |
+| `apiVersion`, `schemaVersion` | `string`, `number` | Versões do contrato. |
+| `projectId` | `string` | Projeto do evento. |
+| `externalRef` | `string \| null` | O `external_ref` do projeto, ou `null` quando ele não tem um. Vale a partir da 0.3.0. |
+| `sequence` | `number` | Ordem do evento. |
+| `occurredAt`, `recordedAt` | `string` | ISO 8601. |
+| `data` | `unknown` | Corpo do evento. Interprete-o pelo valor de `type`. |
+
+Um endpoint de webhook de [parceiro](/sdk/partner#receber-os-eventos-de-todos-os-clientes) recebe os eventos de todos os projetos da organização. Use `projectId` e `externalRef` para saber de qual cliente cada evento é. Para verificar a assinatura dessas entregas, use `partner.webhook.constructEvent()`, que faz o mesmo que `routa.webhooks.constructEvent()`.
+
+### Tratar todos os tipos
+
+Com 17 tipos, vale a pena tratar os grupos pelo prefixo e ignorar o que você não usa:
+
+```ts
+const event = await routa.webhooks.constructEvent(rawBody, header, signingSecret)
+
+if ('id' in event) {
+  switch (event.type) {
+    case 'template.updated':
+    case 'template.deleted':
+      // O template foi editado ou excluído no painel. `data` é o template completo.
+      break
+    case 'template.failed':
+      // A Routa não conseguiu submeter o template. `data` é o template, com `failure_code`.
+      break
+    default:
+      // Qualquer outro tipo, inclusive os que ainda não existem: ignore com segurança.
+      break
+  }
+}
+```
+
+<Note>
+  Se o seu código usa um `switch` exaustivo com uma verificação `never` sobre `EventType`, ele deixa de compilar na 0.3.0 até tratar os quatro tipos novos. Veja [Atualizar para a 0.3.0](/sdk/upgrading).
+</Note>
 
 ## Entregas e reenvio
 

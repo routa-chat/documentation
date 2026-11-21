@@ -61,7 +61,11 @@ interface Page<T> {
 | `routa.templates.list()` | `channel`, `limit`, `cursor` |
 | `routa.webhooks.deliveries.list(webhookId)` | `state`, `limit`, `cursor` |
 | `routa.webhooks.list()` | Retorna uma `Page` com todos os endpoints (no máximo 5). |
+| `partner.projects.list()` | `externalRef`, `hasChannel`, `limit`, `cursor` |
+| `partner.channels.list()` | `status`, `projectId`, `externalRef`, `limit`, `cursor` |
 
 <Note>
   Em `routa.events.list()`, o cursor é o id do último evento, passado em `after`. Veja [Reconciliar eventos](/webhooks/reconciliation).
 </Note>
+
+As duas listagens do [`RoutaPartner`](/sdk/partner) funcionam do mesmo jeito, mas o `limit` vai de 1 a 200 e o padrão é 50.

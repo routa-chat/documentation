@@ -1,0 +1,114 @@
+---
+title: "Mídia"
+description: "Envie um arquivo para a Routa com media.upload(), por bytes ou por URL, e consulte o objeto de mídia com media.retrieve()."
+---
+
+`routa.media` guarda um arquivo na Routa e consulta o objeto de mídia. Para o conceito, os tipos aceitos e os limites, veja [Mídia](/concepts/media).
+
+| Método | Endpoint | Escopo |
+| --- | --- | --- |
+| `upload(params)` | [`POST /v1/media`](/api-reference/endpoint/media/upload) | `media:write` |
+| `retrieve(id)` | [`GET /v1/media/{id}`](/api-reference/endpoint/media/retrieve) | `media:read` |
+
+<Info>
+  `media.upload()` existe a partir da versão 0.3.0. O arquivo de um **cabeçalho de template** não passa por aqui: use [`templates.uploadMedia()`](/sdk/templates#cabeçalho-de-imagem-vídeo-ou-documento).
+</Info>
+
+## `upload`
+
+Há dois modos, e você usa exatamente um deles. Os dois são uma união de tipos: misturá-los, ou passar `file` sem `contentType`, não compila.
+
+### Enviar os bytes
+
+```ts
+import { readFile } from 'node:fs/promises'
+
+const media = await routa.media.upload({
+  file: await readFile('./foto.png'), // um Uint8Array (um Buffer é um) ou um Blob
+  contentType: 'image/png',
+})
+
+console.log(media.id, media.status) // "med_...", "ready"
+```
+
+O SDK envia os bytes como o corpo da requisição, sem JSON nem *multipart*.
+
+- O `contentType` vai como o `Content-Type` da requisição, e é assim que a API descobre o tipo. O SDK **não** o lê do `type` de um `Blob`.
+- Ele precisa ser exatamente um dos tipos aceitos, sem parâmetros como `; charset=...`.
+- Os primeiros bytes do arquivo precisam bater com o tipo. Um PNG declarado como `image/jpeg` é recusado.
+- Não passe `application/json` como `contentType`: a API o lê como o modo por URL e responde `media_source_url_invalid`.
+
+### Pedir que a Routa baixe uma URL
+
+```ts
+const media = await routa.media.upload({
+  sourceUrl: 'https://exemplo.com/foto.png',
+})
+```
+
+A Routa baixa uma URL pública `http` ou `https` e guarda o arquivo. O SDK a envia como JSON, em `{ "source_url": ... }`.
+
+### O resultado
+
+O envio é síncrono: ao terminar, a `Media` já tem `status: 'ready'` e uma `url` assinada, válida por 15 minutos. `retrieve()` emite uma URL nova.
+
+Guarde o `id`. Hoje nada no SDK o consome: `messages.send()` ainda não aceita mídia. Veja [o que o SDK ainda não suporta](/sdk/overview#ainda-não-suportado).
+
+## `retrieve`
+
+```ts
+import { toMediaId } from '@routa-chat/sdk'
+
+const media = await routa.media.retrieve(toMediaId('med_...'))
+
+if (media.status === 'ready' && media.url) {
+  const file = await fetch(media.url)
+}
+```
+
+| Campo | Tipo | Descrição |
+| --- | --- | --- |
+| `id` | `MediaId` | Identificador (`med_...`). |
+| `contentType` | `string` | Tipo do arquivo. |
+| `status` | `'pending' \| 'ready' \| 'unavailable'` | `ready` quando uma URL assinada pode ser emitida. |
+| `url` | `string \| null` | URL assinada nova. Só vem preenchida quando o status é `ready`. |
+
+## Erros
+
+O SDK **não confere** o tamanho nem o tipo do arquivo. Quem decide é a API, e uma regra copiada para o SDK ficaria desatualizada. Um envio recusado lança:
+
+| Erro | `code` | Quando |
+| --- | --- | --- |
+| `RoutaInvalidRequestError` (`422`) | `media_content_type_rejected` | O `contentType` não é um tipo aceito, ou os primeiros bytes não batem com ele. |
+| `RoutaInvalidRequestError` (`422`) | `media_size_limit_exceeded` | O arquivo passa do limite do seu tipo. |
+| `RoutaInvalidRequestError` (`422`) | `media_source_url_invalid` | A `sourceUrl` está vazia ou não é uma URL utilizável. |
+| `RoutaInvalidRequestError` (`422`) | `media_source_blocked` | A `sourceUrl` aponta para um endereço que a Routa se recusa a baixar, como uma rede privada. |
+| `RoutaInvalidRequestError` (`422`) | `media_source_unreachable` | A Routa não conseguiu baixar a `sourceUrl`. |
+| `RoutaApiError` base (`413`) | `payload_too_large` | O corpo passa de 100 MiB. Não é retentado. |
+| `RoutaInvalidRequestError` (`403`) | `insufficient_scope` | A chave não tem `media:write`. |
+
+Nenhum desses erros define `param`. O `413` chega como um `RoutaApiError` base porque o SDK não tem uma subclasse para ele.
+
+```ts
+import { RoutaApiError, RoutaInvalidRequestError } from '@routa-chat/sdk'
+
+try {
+  await routa.media.upload({ file: bytes, contentType: 'image/png' })
+} catch (error) {
+  if (error instanceof RoutaInvalidRequestError && error.code === 'media_size_limit_exceeded') {
+    console.error('Arquivo grande demais para este tipo.')
+  } else if (error instanceof RoutaApiError && error.statusCode === 413) {
+    console.error('Corpo acima de 100 MiB.')
+  } else {
+    throw error
+  }
+}
+```
+
+## Não é idempotente
+
+`POST /v1/media` não lê `Idempotency-Key`, então o SDK não envia uma. O cliente ainda retenta uma falha de rede ou um `5xx`. Se a primeira tentativa já tinha guardado o arquivo e só a resposta se perdeu, a retentativa guarda uma segunda cópia, com outro `id`.
+
+<Warning>
+  Configure `maxRetries: 0` no cliente se uma cópia duplicada importa mais do que a resistência a uma conexão instável. Veja [Configuração](/sdk/configuration#idempotência).
+</Warning>

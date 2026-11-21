@@ -19,15 +19,15 @@ for await (const event of routa.events.list({ type: 'message.failed', after: las
 | `after` | Retoma depois deste id de evento. |
 | `limit` | Itens por página, de 1 a 100. |
 
-Cada item é um `RoutaEvent`, o mesmo tipo que `webhooks.constructEvent()` retorna: `id`, `type`, `apiVersion`, `schemaVersion`, `projectId`, `sequence`, `occurredAt`, `recordedAt` e `data`.
+Cada item é um `RoutaEvent`, o mesmo tipo que `webhooks.constructEvent()` retorna: `id`, `type`, `apiVersion`, `schemaVersion`, `projectId`, `externalRef`, `sequence`, `occurredAt`, `recordedAt` e `data`.
 
-<Note>
-  **Ainda não suportado na versão 0.1.0.** Os eventos `template.failed` e `template.category_changed` existem na API, mas não estão nos tipos do SDK. Eles chegam como um evento genérico, com `type` do tipo `string` e `data` como `unknown`. Trate-os pelo valor de `type`.
-</Note>
+`externalRef` é o `external_ref` do projeto, ou `null` quando o projeto não tem um. Só projetos criados por um [parceiro](/partners/overview) têm esse valor.
+
+O SDK conhece 17 tipos de evento. Veja a lista em [Webhooks](/sdk/webhooks#tipos-de-evento).
 
 ## Templates
 
-`routa.templates` submete templates para aprovação e consulta o resultado. Veja [Templates](/concepts/templates).
+`routa.templates` submete templates para aprovação, envia o arquivo de um cabeçalho de mídia e consulta o resultado. Veja [Templates](/sdk/templates) para os componentes e os erros, e [Templates](/concepts/templates) para o ciclo de vida.
 
 ```ts
 const template = await routa.templates.submit({
@@ -38,37 +38,39 @@ const template = await routa.templates.submit({
   bodyText: 'Olá {{1}}! Seu pedido {{2}} foi confirmado.',
 })
 
-console.log(template.id, template.status)
+console.log(template.id, template.status) // "tmpl_...", "submitted"
 ```
 
 | Método | Descrição |
 | --- | --- |
-| `submit(params)` | Cria o template e o envia para aprovação. |
+| `submit(params)` | Cria o template e o envia para aprovação. Aceita `components`. |
+| `uploadMedia({ file, contentType })` | Envia o arquivo de um cabeçalho de imagem, vídeo ou documento. |
 | `retrieve(id)` | Consulta um template e o status de aprovação. |
 | `list({ channel?, limit?, cursor? })` | Lista templates, com paginação automática. |
 
 ```ts
 import { toTemplateId } from '@routa-chat/sdk'
 
-const approved = await routa.templates.retrieve(toTemplateId('tmpl_...'))
-if (approved.status === 'approved') {
-  // já pode ser enviado
-} else if (approved.status === 'rejected') {
-  console.log(approved.rejectionReason)
+const template = await routa.templates.retrieve(toTemplateId('tmpl_...'))
+
+switch (template.status) {
+  case 'approved':
+    // já pode ser enviado
+    break
+  case 'rejected':
+    console.log(template.rejectionReason)
+    break
+  case 'failed':
+    console.error(template.failureCode, template.failureDetail)
+    break
 }
 ```
 
-<Info>
-  `templates.submit()` aceita apenas o corpo de texto. Para cabeçalho, rodapé e botões, use `POST /v1/templates` pela [API REST](/api-reference/endpoint/templates/create).
-</Info>
-
-<Note>
-  **Ainda não suportado na versão 0.1.0.** A API devolve o status `failed` e os campos `failure_code`, `origin`, `read_only` e `unsupported_components` em um template. Eles existem na API, mas não estão nos tipos do SDK: `TemplateStatus` não inclui `failed` e `Template` não tem esses campos. Para tratar um template `failed` ou importado, consulte `GET /v1/templates/{id}` pela [API REST](/api-reference/endpoint/templates/retrieve). Veja [Templates](/concepts/templates).
-</Note>
+O SDK **não edita nem exclui** templates. Essas operações existem só no painel. Um template com `deletionRequested: true` está sendo excluído e não pode ser enviado.
 
 ## Mídia
 
-`routa.media.retrieve(id)` retorna o objeto de mídia com uma URL assinada nova, válida por 15 minutos, quando o status é `ready`. Veja [Mídia](/concepts/media).
+`routa.media` envia um arquivo para a Routa e consulta o objeto de mídia. Veja [Mídia](/sdk/media) para o envio e [Mídia](/concepts/media) para o conceito.
 
 ```ts
 import { toMediaId } from '@routa-chat/sdk'
@@ -80,7 +82,7 @@ if (media.status === 'ready' && media.url) {
 }
 ```
 
-O SDK **não tem** `media.upload()`. Para enviar ou hospedar um arquivo, use [`POST /v1/media`](/api-reference/endpoint/media/upload) diretamente.
+`retrieve()` devolve uma URL assinada nova, válida por 15 minutos, quando o status é `ready`.
 
 ## Uso
 

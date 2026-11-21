@@ -1,0 +1,88 @@
+---
+title: "Atualizar o SDK"
+description: "O que muda ao atualizar o @routa-chat/sdk para a 0.3.0 e, antes dela, para a 0.2.0: o que deixa de compilar e como migrar."
+---
+
+O SDK é 0.x. Uma mudança em um tipo público sai como uma versão minor. Nada foi removido nem renomeado na 0.3.0. A lista completa está no [CHANGELOG](https://github.com/routa-chat/routa-nodejs-sdk/blob/master/CHANGELOG.md).
+
+## Da 0.2.0 para a 0.3.0
+
+A 0.3.0 alinha os tipos do SDK ao contrato atual da API e traz três recursos novos: [`media.upload()`](/sdk/media), [`components` e `templates.uploadMedia()`](/sdk/templates) e a [API de parceiros](/sdk/partner), que é experimental.
+
+### O que pode deixar de compilar
+
+**`TemplateStatus` tem um membro novo, `'failed'`.** A Routa não conseguiu submeter o template ao provedor. Um `switch` sobre o status que termina em uma verificação `never` precisa do caso novo. `failureCode` e `failureDetail` dizem o motivo.
+
+**`EventType` passa de 13 para 17 membros.** `template.failed`, `template.category_changed`, `template.updated` e `template.deleted` são novos, e `RoutaEvent` tem um membro para cada um. Um `switch (event.type)` exaustivo precisa tratá-los. Veja [Webhooks](/sdk/webhooks#tipos-de-evento).
+
+**Campos novos e obrigatórios nos tipos que você lê.** Ler um `Template`, uma `Message` ou um evento continua igual. Código que **constrói** um desses valores, como um dado de teste ou um *mock* do SDK, deixa de compilar até fornecer os campos:
+
+| Tipo | Campos novos |
+| --- | --- |
+| `Template` | `bodyText` (`string \| null`), `failureCode`, `failureDetail`, `deletionRequested`, `deletionFailureDetail`, `origin`, `readOnly` e `unsupportedComponents`. `components` é opcional e ausente em um template só com corpo. |
+| `Message` | `origin` (`'api'`, `'business_app'` ou `null` em uma mensagem recebida) e `failureCode`. |
+| Todo evento conhecido | `externalRef`, o `external_ref` do projeto ou `null`. |
+
+**`RoutaApiError` ganha `type` e `details`.** `ErrorEnvelope` e `RoutaApiErrorDetails` os aceitam, e os dois são opcionais: a resposta de um proxy não tem nenhum.
+
+**`402` e `409` têm classes próprias.** `RoutaBillingError` (com `limit`, `used` e `resetsAt`) e `RoutaConflictError` (com `reason`) estendem `RoutaApiError`. Um `catch` em `RoutaApiError` continua funcionando. Só código que comparava `error.constructor === RoutaApiError` para esses status percebe a diferença. A política de retentativa não muda: um `402` nunca é retentado, e um `409` só quando é `idempotency_in_progress`. Veja [Tratamento de erros](/sdk/error-handling).
+
+**`HttpResponse` tem `status`.** Quem implementa a interface interna `HttpClient`, como um *test double* do transporte, precisa devolver `status` em `requestWithHeaders()`. A interface não é exportada, então quem só chama `routa.*` não é afetado.
+
+**`new Routa('rt_partner_...')` lança um erro.** Uma chave de parceiro só é aceita pelas rotas de parceiros, então um `Routa` construído com ela respondia `401` a toda chamada. Nada que funcionava foi afetado. Use o [`RoutaPartner`](/sdk/partner).
+
+### Como migrar
+
+```ts
+import { RoutaBillingError } from '@routa-chat/sdk'
+import type { Template } from '@routa-chat/sdk'
+
+// 1. Trate o status novo.
+function report(template: Template) {
+  switch (template.status) {
+    // ...os casos que você já tem...
+    case 'failed':
+      console.error(template.failureCode, template.failureDetail)
+      break
+  }
+
+  // 2. `components` pode estar ausente: proteja a leitura.
+  if (template.components?.buttons) {
+    console.log(template.components.buttons.length)
+  }
+}
+
+// 3. Distinga um erro de cobrança.
+try {
+  await routa.messages.send(params)
+} catch (error) {
+  if (!(error instanceof RoutaBillingError)) throw error
+
+  // A franquia gratuita ou a do plano acabou. Pare de enviar.
+  console.error(error.code, error.used, error.limit)
+}
+```
+
+### O que é novo
+
+- **Mídia.** [`routa.media.upload()`](/sdk/media) guarda um arquivo, por bytes ou por URL. Quem usava `POST /v1/media` direto pode migrar.
+- **Templates com componentes.** [`templates.submit()`](/sdk/templates) aceita `components`, com cabeçalho, rodapé e até 10 botões. [`templates.uploadMedia()`](/sdk/templates#cabeçalho-de-imagem-vídeo-ou-documento) envia o arquivo de um cabeçalho de mídia.
+- **Campos novos.** `Template` (`bodyText`, `components` e os demais), `Message` (`origin`, `failureCode`) e os eventos (`externalRef`).
+- **Tipos novos exportados.** `MessageOrigin`, `TemplateFailureCode`, `TemplateOrigin`, `TemplateUnsupportedComponent`, `TemplateComponents`, `TemplateHeader`, `TemplateFooter`, `TemplateButton`, `TemplateHeaderMediaFormat` e `RoutaErrorDetailValues`, além de `TemplateMediaId`, `TemplateMedia` e os tipos `*Input` dos componentes. Veja [Tipos e IDs](/sdk/typescript).
+- **API de parceiros.** [`RoutaPartner`](/sdk/partner), em `@routa-chat/sdk/partner`. Experimental.
+
+## Da 0.1.0 para a 0.2.0
+
+`Message['content']` passou a ser `MessageContent | null`, e `Message` ganhou `contentRedactedAt: string | null`.
+
+A Routa remove o conteúdo de uma mensagem depois do período de retenção do plano e devolve `content: null` com `content_redacted_at`. Na 0.1.0, `messages.retrieve()` e `messages.list()` lançavam `TypeError: Cannot read properties of null` ao encontrar uma dessas mensagens, e uma só derrubava a listagem inteira. Agora elas são devolvidas com o resto da mensagem intacto.
+
+É uma mudança de tipo, então código que lê `message.content` sem verificar deixa de compilar. Proteja a leitura:
+
+```ts
+if (message.content) {
+  console.log(message.content.type)
+}
+```
+
+Veja [Mensagens](/sdk/messages#mensagens-com-conteúdo-removido) e [Conteúdo removido pela retenção](/concepts/messages#conteúdo-removido-pela-retenção).
