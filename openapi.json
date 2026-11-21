@@ -39,6 +39,10 @@
     {
       "name": "Identidade",
       "description": "Identifique a chave de API em uso."
+    },
+    {
+      "name": "Parceiros",
+      "description": "Crie um projeto por cliente, emita a chave de cada projeto, acompanhe os canais e receba os eventos de todos os clientes em um só webhook. Estas rotas usam uma chave de parceiro (`rt_partner_...`). Veja [API de parceiro](/partners/overview)."
     }
   ],
   "security": [
@@ -233,7 +237,7 @@
           "Mensagens"
         ],
         "summary": "Listar mensagens",
-        "description": "Lista as mensagens do projeto, da mais recente para a mais antiga, com paginação por cursor. Filtre por `direction` para ver só as recebidas ou só as enviadas.",
+        "description": "Lista as mensagens do projeto, da mais recente para a mais antiga, com paginação por cursor. Filtre por `direction` para ver só as recebidas ou só as enviadas.\n\nEm um número conectado em modo de coexistência, a lista inclui as mensagens que a empresa enviou pelo app do WhatsApp Business (`origin: business_app`) e o histórico importado. Uma mensagem com conteúdo mais antigo que a retenção do plano vem com `content: null` e `content_redacted_at`.",
         "parameters": [
           {
             "schema": {
@@ -511,7 +515,7 @@
           "Eventos"
         ],
         "summary": "Listar eventos",
-        "description": "Lista os eventos do projeto em ordem crescente de `sequence`, do mais antigo para o mais recente. É o caminho de **reconciliação** para quem perdeu entregas de webhook: guarde o `id` do último evento processado e passe-o em `after`.\n\nOs eventos ficam disponíveis por 90 dias. Veja [Reconciliar eventos](/webhooks/reconciliation).",
+        "description": "Lista os eventos do projeto em ordem crescente de `sequence`, do mais antigo para o mais recente. É o caminho de **reconciliação** para quem perdeu entregas de webhook: guarde o `id` do último evento processado e passe-o em `after`.\n\nOs eventos ficam disponíveis por 90 dias. Veja [Reconciliar eventos](/webhooks/reconciliation).\n\nCada evento traz o `external_ref` do projeto, que é `null` quando o projeto não tem um.",
         "parameters": [
           {
             "schema": {
@@ -531,13 +535,15 @@
                 "template.paused",
                 "template.disabled",
                 "template.failed",
-                "template.category_changed"
+                "template.category_changed",
+                "template.updated",
+                "template.deleted"
               ]
             },
             "in": "query",
             "name": "type",
             "required": false,
-            "description": "Filtra por tipo de evento."
+            "description": "Filtra por tipo de evento, por exemplo `message.delivered` ou `template.deleted`."
           },
           {
             "description": "Retoma a listagem depois deste id de evento (`evt_...`).",
@@ -1620,7 +1626,7 @@
           "Templates"
         ],
         "summary": "Submeter template",
-        "description": "Cria um template e o envia ao WhatsApp para aprovação. A aprovação é decidida pelo provedor, no tempo dele. Acompanhe pelos eventos `template.*` ou consultando o template.\n\nSomente templates `approved` podem ser usados em `POST /v1/messages`. Veja [Templates](/concepts/templates).",
+        "description": "Cria um template e o envia ao WhatsApp para aprovação. A aprovação é decidida pelo provedor, no tempo dele. Acompanhe pelos eventos `template.*` ou consultando o template.\n\nSomente templates `approved` podem ser usados em `POST /v1/messages`. Veja [Templates](/concepts/templates).\n\nA Routa recusa **na hora**, com `422`, o que o WhatsApp já é conhecido por recusar. Assim o erro chega no campo certo, em vez de um template `failed` minutos depois. O campo `error.param` diz qual parte da requisição falhou.\n\n| Regra | Erro e `error.param` |\n| --- | --- |\n| O nome usa só `a-z`, `0-9` e `_`, até 512 caracteres | `template_name_invalid`, `name` |\n| O corpo tem até 1024 caracteres | `template_components_invalid`, `body_text` |\n| O corpo não começa nem termina com uma variável `{{n}}` | `template_variables_invalid` |\n| O cabeçalho de texto tem até 60 caracteres e uma variável | `template_components_invalid`, `components.header` |\n| O rodapé tem até 60 caracteres | `template_components_invalid`, `components.footer` |\n| No máximo 10 botões, 1 de telefone e 2 de URL | `template_components_invalid`, `components.buttons` |\n| Os botões de resposta rápida ficam juntos, sem outros botões no meio | `template_components_invalid`, `components.buttons` |\n| O texto do botão tem até 25 caracteres, a URL até 2000 e o telefone até 20 | `template_components_invalid`, `components.buttons` |\n| A variável `{{1}}` de uma URL fica no fim dela, e a URL não aponta para `api.whatsapp.com` | `template_components_invalid`, `components.buttons` |\n| Um template `authentication` não aceita botões próprios | `template_components_invalid`, `components.buttons` |\n\nO WhatsApp decide a aprovação. Uma regra que a Routa não verifica ainda pode levar a `rejected` ou `failed`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1641,7 +1647,7 @@
                     "example": "chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
                   },
                   "name": {
-                    "description": "Nome do template.",
+                    "description": "Nome do template: só letras minúsculas, dígitos e `_` (`a-z`, `0-9`, `_`), até 512 caracteres.",
                     "type": "string",
                     "example": "confirmacao_pedido"
                   },
@@ -1660,7 +1666,7 @@
                     "description": "Categoria do template: `marketing`, `utility` ou `authentication`."
                   },
                   "body_text": {
-                    "description": "Corpo do template, com placeholders posicionais `{{1}}`, `{{2}}`, …",
+                    "description": "Corpo do template, com placeholders posicionais `{{1}}`, `{{2}}`, …, até 1024 caracteres. Não pode começar nem terminar com uma variável.",
                     "type": "string",
                     "example": "Olá {{1}}! Seu pedido {{2}} foi confirmado."
                   },
@@ -1725,7 +1731,7 @@
                         "description": "Rodapé em texto, com até 60 caracteres."
                       },
                       "buttons": {
-                        "description": "Até 10 botões. No máximo um botão `phone_number`. O texto de cada botão tem até 25 caracteres, e a URL de um botão `url` pode ter uma variável `{{1}}`.",
+                        "description": "Até 10 botões: no máximo 1 `phone_number` e 2 `url`. Os `quick_reply` ficam juntos, antes ou depois dos outros. O texto de cada botão tem até 25 caracteres. A URL de um botão `url` tem até 2000 caracteres e pode ter uma variável `{{1}}`, que só pode ficar no fim da URL.",
                         "type": "array",
                         "items": {
                           "oneOf": [
@@ -1890,7 +1896,7 @@
           "Templates"
         ],
         "summary": "Listar templates",
-        "description": "Lista os templates do projeto com paginação por cursor. Filtre por canal com `channel`. A listagem inclui os templates importados do WhatsApp (`origin: provider`), inclusive os somente leitura (`read_only: true`), que não podem ser usados para enviar.",
+        "description": "Lista os templates do projeto com paginação por cursor. Filtre por canal com `channel`. A listagem inclui os templates importados do WhatsApp (`origin: provider`), inclusive os somente leitura (`read_only: true`), que não podem ser usados para enviar. Editar e excluir um template é feito no painel.",
         "parameters": [
           {
             "schema": {
@@ -1992,7 +1998,7 @@
           "Templates"
         ],
         "summary": "Consultar template",
-        "description": "Retorna um template com o `status` de aprovação atual. Se ele foi rejeitado, `rejection_reason` indica o motivo. Se a Routa não conseguiu submetê-lo (`status: failed`), `failure_code` indica o motivo e é preciso criar o template de novo.",
+        "description": "Retorna um template com o `status` de aprovação atual. Se ele foi rejeitado, `rejection_reason` indica o motivo. Se a Routa não conseguiu submetê-lo (`status: failed`), `failure_code` indica o motivo e `failure_detail` traz a frase do provedor, quando ele a deu. Pela API, é preciso criar o template de novo. No painel, um template `failed` ou `rejected` pode ser editado e reenviado.\n\nQuando uma exclusão feita no painel está em andamento, `deletion_requested` é `true` e o template não pode ser usado para enviar.",
         "parameters": [
           {
             "schema": {
@@ -2463,6 +2469,1367 @@
           }
         ]
       }
+    },
+    "/v1/partner/projects": {
+      "post": {
+        "operationId": "createPartnerProject",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Criar projeto de um cliente",
+        "description": "Cria o projeto de um cliente seu. Use **um projeto por cliente**.\n\nO `external_ref` é o **seu** identificador do cliente. Ele é único na organização e não muda depois. Repetir a chamada com o mesmo `external_ref` não cria um segundo projeto: a API devolve o existente com `200`, e o `name` enviado é ignorado. A primeira chamada retorna `201`.\n\nCriar o projeto é opcional: o primeiro [link assinado](/partners/signed-link) de um cliente também o cria. O projeto sempre nasce em produção (`environment: live`).\n\nO plano limita o número de projetos. Ao atingir o limite, a API retorna `402 project_limit_exceeded`. Apagar um projeto de um cliente que saiu devolve a vaga.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "external_ref"
+                ],
+                "properties": {
+                  "name": {
+                    "description": "Nome do projeto, de 1 a 200 caracteres. Aparece para o cliente na página de conexão. É um nome de exibição, não uma identidade.",
+                    "type": "string",
+                    "example": "Loja do Zé"
+                  },
+                  "external_ref": {
+                    "description": "Seu identificador do cliente: de 1 a 128 caracteres entre `A-Z`, `a-z`, `0-9`, `.`, `_`, `:` e `-`. Nunca use e-mail, telefone ou nome. É único na organização e definido uma vez.",
+                    "type": "string",
+                    "example": "lead_123"
+                  }
+                }
+              },
+              "example": {
+                "name": "Loja do Zé",
+                "external_ref": "lead_123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Já existia um projeto com este `external_ref`. Ele é devolvido sem alteração",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerProject"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Projeto criado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerProject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "O limite de projetos do plano foi atingido (`project_limit_exceeded`, com `error.details.limit`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida (`invalid_project_name`, `invalid_external_ref`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "projects:write"
+            ]
+          }
+        ],
+        "x-required-scope": "projects:write"
+      },
+      "get": {
+        "operationId": "listPartnerProjects",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Listar projetos",
+        "description": "Lista os projetos criados pela API de parceiro, com paginação por cursor. Os projetos que a sua equipe criou no painel não aparecem.\n\nFiltre por `external_ref` para achar o projeto de um cliente, ou por `has_channel` para separar quem já conectou um número de quem ainda não conectou.",
+        "parameters": [
+          {
+            "description": "Devolve só o projeto que tem este `external_ref`. Uma página vazia quando nenhum projeto o tem.",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "external_ref",
+            "required": false
+          },
+          {
+            "description": "Use `false` para os projetos sem nenhum canal e `true` para os que têm algum, em qualquer estado. Um projeto que só tem canais desativados **não** é um projeto sem canal. Qualquer outro valor retorna `422`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "has_channel",
+            "required": false
+          },
+          {
+            "description": "Quantidade de itens por página, de 1 a 200. O padrão é 50.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "description": "Valor de `next_cursor` da página anterior. Trate-o como opaco.",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerProjectList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida (`invalid_cursor`, `invalid_external_ref`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "projects:read"
+            ]
+          }
+        ],
+        "x-required-scope": "projects:read"
+      }
+    },
+    "/v1/partner/projects/{projectId}": {
+      "get": {
+        "operationId": "retrievePartnerProject",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Consultar projeto",
+        "description": "Retorna o projeto com o seu `external_ref` e os canais dele (`id` e `status`).\n\nÉ **esta** consulta, e não o redirecionamento do link assinado, que confirma uma conexão. O redirecionamento é apenas uma dica: qualquer pessoa pode forjar uma requisição para o seu `redirect_url`. Veja o [guia de onboarding](/partners/onboarding).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "description": "Identificador do projeto (`proj_...`). Só vale para um projeto criado pela API de parceiro."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerProjectDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "projects:read"
+            ]
+          }
+        ],
+        "x-required-scope": "projects:read"
+      },
+      "patch": {
+        "operationId": "updatePartnerProject",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Renomear projeto",
+        "description": "Renomeia o projeto. O `external_ref` **não pode mudar**: enviar o valor atual é aceito, e qualquer outro valor retorna `422 external_ref_immutable`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "description": "Identificador do projeto (`proj_...`). Só vale para um projeto criado pela API de parceiro."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "description": "Novo nome de exibição, de 1 a 200 caracteres.",
+                    "type": "string",
+                    "example": "Loja do Zé Ltda"
+                  },
+                  "external_ref": {
+                    "description": "Aceito só para ser recusado. Envie o valor atual ou omita o campo.",
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "name": "Loja do Zé Ltda"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerProject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida (`invalid_project_name`, `external_ref_immutable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "projects:write"
+            ]
+          }
+        ],
+        "x-required-scope": "projects:write"
+      },
+      "delete": {
+        "operationId": "deletePartnerProject",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Apagar projeto",
+        "description": "Apaga o projeto de um cliente e tudo o que ele contém, para devolver a vaga ao limite de projetos do plano. Um link abandonado ou um cliente que saiu continuam contando até você apagar o projeto.\n\nExige o escopo `projects:delete`, que **não** vem em uma chave nova. Vale só para um projeto criado pela API de parceiro.\n\nA API apaga mensagens, templates, eventos, contatos, chaves, endpoints de webhook, arquivos de mídia e os canais **desativados** do projeto. Os números desses canais ficam livres. O plano, a franquia, o registro de auditoria e as chaves de parceiro da organização não mudam. Nada muda no WhatsApp.\n\nO projeto não pode ser apagado quando ainda tem um canal que não está desativado (`has_enabled_channel`) nem quando é o último projeto da organização (`last_project`). Nos dois casos a resposta é `409 project_not_deletable`.\n\nA resposta é `204` quando o projeto sumiu. Em um projeto grande, a chamada pode apagar só uma parte e retornar `202` com `status: deleting`. O projeto continua lá, parcialmente apagado. **Repita a mesma chamada até receber `204`.**",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "description": "Identificador do projeto (`proj_...`). Só vale para um projeto criado pela API de parceiro."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "A exclusão ainda não terminou. Repita a chamada até receber `204`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerProjectDeleting"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "O projeto foi apagado"
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "O projeto não pode ser apagado (`project_not_deletable`). `error.details.reason` é `has_enabled_channel` ou `last_project`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "projects:delete"
+            ]
+          }
+        ],
+        "x-required-scope": "projects:delete"
+      }
+    },
+    "/v1/partner/projects/{projectId}/api_keys": {
+      "post": {
+        "operationId": "createPartnerProjectApiKey",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Emitir chave de API do projeto",
+        "description": "Emite a chave de API de um projeto. É **esta** chave, e não a chave de parceiro, que o tráfego do cliente usa em `/v1/messages`, `/v1/templates` e nas demais rotas. A chave de parceiro nunca envia mensagens.\n\nO `secret` é exibido **uma única vez**, na resposta. Guarde-o com segurança.\n\nExige o escopo `api_keys:write`, que **não** vem em uma chave de parceiro nova. Uma chave de parceiro vazada com esse escopo pode emitir chaves que enviam mensagens para qualquer cliente seu. Restrinja-a aos endereços dos seus servidores e defina uma expiração.\n\nPeça o menor conjunto de escopos que funciona. Os escopos de uma chave de projeto estão em [Autenticação](/authentication). Valores desconhecidos são ignorados, e `scopes: []` gera uma chave que não pode fazer nada.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "description": "Identificador do projeto (`proj_...`). Só vale para um projeto criado pela API de parceiro."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "scopes"
+                ],
+                "properties": {
+                  "name": {
+                    "description": "Como você chama esta chave, por exemplo `Backend do cliente 123`. No máximo 80 caracteres, depois de remover os espaços das pontas.",
+                    "type": "string",
+                    "example": "Loja do Zé"
+                  },
+                  "scopes": {
+                    "description": "Escopos da chave do projeto. Peça apenas os necessários.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "messages:write",
+                      "messages:read"
+                    ]
+                  },
+                  "expires_at": {
+                    "format": "date-time",
+                    "type": "string",
+                    "description": "Quando a chave expira, em ISO 8601. Sem este campo, a chave não expira."
+                  },
+                  "ip_allowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Endereços IPv4 ou blocos CIDR IPv4 que podem usar a chave. Endereços IPv6 são comparados como texto exato. Uma lista vazia não restringe."
+                  }
+                }
+              },
+              "example": {
+                "name": "Loja do Zé",
+                "scopes": [
+                  "messages:write",
+                  "messages:read"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Chave criada. O `secret` aparece uma única vez",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerProjectApiKeyWithSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida (`invalid_api_key_name`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "api_keys:write"
+            ]
+          }
+        ],
+        "x-required-scope": "api_keys:write"
+      }
+    },
+    "/v1/partner/projects/{projectId}/api_keys/{id}/rotate": {
+      "post": {
+        "operationId": "rotatePartnerProjectApiKey",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Rotacionar chave de API do projeto",
+        "description": "Cria uma chave de substituição para a chave informada. A chave original **continua ativa** até você revogá-la, então dá para trocar a chave no seu sistema sem interromper o envio. A resposta traz o `secret` da chave nova, exibido uma única vez.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "description": "Identificador do projeto (`proj_...`). Só vale para um projeto criado pela API de parceiro."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador da chave de API do projeto (`key_...`)."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Chave nova criada. O `secret` aparece uma única vez",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerProjectApiKeyWithSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "api_keys:write"
+            ]
+          }
+        ],
+        "x-required-scope": "api_keys:write"
+      }
+    },
+    "/v1/partner/projects/{projectId}/api_keys/{id}/revoke": {
+      "post": {
+        "operationId": "revokePartnerProjectApiKey",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Revogar chave de API do projeto",
+        "description": "Revoga a chave. Ela deixa de funcionar na hora. Use depois de [rotacionar](/api-reference/endpoint/partner/rotate-project-api-key) uma chave, ou quando um cliente sair.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "description": "Identificador do projeto (`proj_...`). Só vale para um projeto criado pela API de parceiro."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Identificador da chave de API do projeto (`key_...`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chave revogada. O `revoked_at` indica quando",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerProjectApiKey"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "api_keys:write"
+            ]
+          }
+        ],
+        "x-required-scope": "api_keys:write"
+      }
+    },
+    "/v1/partner/channels": {
+      "get": {
+        "operationId": "listPartnerChannels",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Listar canais dos clientes",
+        "description": "Lista, em uma chamada, os canais de todos os seus clientes, em qualquer estado (`pending`, `active`, `degraded` e `disabled`). Cada canal traz o `external_ref` do projeto dele.\n\nUm canal `disabled` impede que o projeto seja apagado e continua ocupando o número. Para liberar o número, [apague o canal](/api-reference/endpoint/partner/delete-channel).\n\nO item não traz credenciais nem dados do provedor.",
+        "parameters": [
+          {
+            "description": "Devolve só os canais neste estado: `pending`, `active`, `degraded` ou `disabled`. Qualquer outro valor retorna `422`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "active",
+                "degraded",
+                "disabled"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "description": "Devolve só os canais deste projeto (`proj_...`). Uma página vazia quando a organização não tem o projeto.",
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "in": "query",
+            "name": "project_id",
+            "required": false
+          },
+          {
+            "description": "Devolve só os canais do projeto que tem este `external_ref`. Uma página vazia quando nenhum projeto o tem.",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "external_ref",
+            "required": false
+          },
+          {
+            "description": "Quantidade de itens por página, de 1 a 200. O padrão é 50.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "description": "Valor de `next_cursor` da página anterior. Trate-o como opaco.",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerChannelList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida (`status` desconhecido, `invalid_cursor`, `invalid_external_ref`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "projects:read"
+            ]
+          }
+        ],
+        "x-required-scope": "projects:read"
+      }
+    },
+    "/v1/partner/projects/{projectId}/channels/{channelId}": {
+      "delete": {
+        "operationId": "deletePartnerChannel",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Apagar canal desativado",
+        "description": "Apaga um canal **desativado** de um projeto seu, para liberar o número e o cliente poder conectá-lo de novo.\n\nExige o escopo `channels:write`, que **não** vem em uma chave de parceiro nova. Um canal em qualquer outro estado retorna `409 channel_not_disabled`.\n\nA API apaga o canal, a credencial e os templates dele. As mensagens, o uso e os eventos continuam citando o canal. Nada muda no WhatsApp.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "description": "Identificador do projeto (`proj_...`). Só vale para um projeto criado pela API de parceiro."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "channelId",
+            "required": true,
+            "description": "Identificador do canal (`chan_...`)."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "O canal foi apagado"
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "O canal não está desativado (`channel_not_disabled`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "channels:write"
+            ]
+          }
+        ],
+        "x-required-scope": "channels:write"
+      }
+    },
+    "/v1/partner/webhook": {
+      "get": {
+        "operationId": "retrievePartnerWebhook",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Consultar webhook da organização",
+        "description": "Retorna o único endpoint de webhook da organização, com `status`, `consecutive_failures` e os horários do último sucesso e da última falha. O segredo nunca é retornado.\n\nNão existe um escopo só de leitura: a rota usa `webhooks:write`.",
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A organização ainda não configurou o webhook (`webhook_endpoint_not_found`), ou o plano não inclui a API de parceiro (`partner_api_not_available`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      },
+      "put": {
+        "operationId": "setPartnerWebhook",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Configurar webhook da organização",
+        "description": "Configura o **único** endpoint de webhook da organização, que recebe os eventos de **todos** os seus clientes. Cada evento traz o `project_id` e o `external_ref` do projeto, então você roteia pelo seu próprio identificador, sem manter uma tabela.\n\nA primeira chamada cria o endpoint e retorna `201` com o `secret` de assinatura, **exibido uma única vez**. As chamadas seguintes (`200`) substituem a URL e os tipos assinados, reativam o endpoint e não retornam o segredo.\n\nAs assinaturas e as tentativas seguem as regras dos [webhooks](/webhooks/overview) de um projeto. Você pode manter também endpoints em projetos individuais: nesse caso, recebe as duas entregas.\n\nUm endpoint que carrega muitos clientes é o gargalo de todos eles. Ele tem no máximo 32 entregas simultâneas (8 em um endpoint de projeto), então responda rápido e enfileire o trabalho do seu lado. Veja [Webhook da organização](/partners/webhook).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "subscribed_types"
+                ],
+                "properties": {
+                  "url": {
+                    "description": "URL HTTPS que recebe os eventos de todos os projetos da organização. O endereço precisa resolver para um host público.",
+                    "type": "string",
+                    "example": "https://crm.exemplo.com/routa"
+                  },
+                  "subscribed_types": {
+                    "minItems": 1,
+                    "description": "Tipos de evento ou curingas por recurso (`message.*`, `channel.*`, `template.*`). Pelo menos um. O curinga `*` sozinho não é aceito.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "message.*",
+                      "channel.status_changed"
+                    ]
+                  }
+                }
+              },
+              "example": {
+                "url": "https://crm.exemplo.com/routa",
+                "subscribed_types": [
+                  "message.*",
+                  "channel.status_changed"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Endpoint atualizado e reativado. A resposta não traz o segredo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Endpoint criado. O `secret` aparece uma única vez",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requisição inválida (`invalid_webhook_url`, `invalid_subscribed_types`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
+    },
+    "/v1/partner/webhook/rotate_secret": {
+      "post": {
+        "operationId": "rotatePartnerWebhookSecret",
+        "tags": [
+          "Parceiros"
+        ],
+        "summary": "Rotacionar segredo do webhook",
+        "description": "Gera um novo segredo de assinatura e o retorna, **uma única vez**. O segredo anterior continua assinando as entregas por **24 horas**, então você troca o segredo no seu sistema sem perder eventos. Veja [Verificar assinaturas](/webhooks/signatures).",
+        "responses": {
+          "201": {
+            "description": "Segredo novo gerado. Ele aparece uma única vez",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A chave de parceiro não tem o escopo necessário (`insufficient_scope`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A organização ainda não configurou o webhook (`webhook_endpoint_not_found`), ou o plano não inclui a API de parceiro (`partner_api_not_available`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partnerAuth": [
+              "webhooks:write"
+            ]
+          }
+        ],
+        "x-required-scope": "webhooks:write"
+      }
     }
   },
   "components": {
@@ -2471,6 +3838,11 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Chave de API do projeto, no formato `rt_live_...` ou `rt_test_...`, enviada como `Authorization: Bearer <chave>`."
+      },
+      "partnerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Chave de parceiro, no formato `rt_partner_...`, enviada como `Authorization: Bearer <chave>`. Vale apenas para as rotas `/v1/partner/*`. Uma chave de projeto não funciona nelas, e uma chave de parceiro não funciona nas demais rotas."
       }
     },
     "schemas": {
@@ -2503,7 +3875,8 @@
               },
               "param": {
                 "type": "string",
-                "description": "O campo da requisição com problema, quando se aplica."
+                "description": "O campo da requisição com problema, quando se aplica. Hoje vem preenchido nos erros de template: `name` em `template_name_invalid`, e `body_text`, `components.header`, `components.footer` ou `components.buttons` em `template_components_invalid`. É o componente, não o item dentro dele.",
+                "example": "components.buttons"
               },
               "doc_url": {
                 "type": "string",
@@ -2555,7 +3928,17 @@
               "outbound",
               "inbound"
             ],
-            "description": "Direção da mensagem: `outbound` (enviada por você) ou `inbound` (recebida)."
+            "description": "Direção da mensagem: `outbound` (saiu do número do canal, pela API ou pelo app do WhatsApp Business) ou `inbound` (recebida)."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "api",
+              "business_app"
+            ],
+            "nullable": true,
+            "description": "De onde veio uma mensagem `outbound`: `api` (enviada pela Routa) ou `business_app` (a empresa enviou pelo app do WhatsApp Business, em um número conectado em modo de coexistência). Uma mensagem `business_app` não é cobrada nem entra no uso. É `null` em uma mensagem `inbound`.",
+            "example": "api"
           },
           "from": {
             "type": "string",
@@ -2564,7 +3947,7 @@
           },
           "to": {
             "type": "string",
-            "description": "Endereço de destino, em E.164.",
+            "description": "Endereço de destino, em E.164. Em uma mensagem `business_app`, pode ser um identificador do provedor quando o número do destinatário não é conhecido.",
             "example": "+5581999999999"
           },
           "content": {
@@ -2803,7 +4186,7 @@
           "failure_code": {
             "type": "string",
             "nullable": true,
-            "description": "Motivo da falha, de um conjunto fechado de códigos da Routa. `null` até a mensagem falhar.",
+            "description": "Motivo da falha, de um conjunto fechado de códigos da Routa, nunca um código do provedor. `null` até a mensagem falhar.",
             "example": null
           },
           "metadata": {
@@ -2852,6 +4235,7 @@
           "id",
           "channel",
           "direction",
+          "origin",
           "from",
           "to",
           "content",
@@ -2900,6 +4284,7 @@
           "api_version",
           "schema_version",
           "project_id",
+          "external_ref",
           "sequence",
           "occurred_at",
           "recorded_at",
@@ -2928,7 +4313,9 @@
               "template.paused",
               "template.disabled",
               "template.failed",
-              "template.category_changed"
+              "template.category_changed",
+              "template.updated",
+              "template.deleted"
             ],
             "description": "Tipo do evento, no formato `recurso.ação_no_passado`."
           },
@@ -2946,6 +4333,12 @@
             "type": "string",
             "description": "Projeto dono do evento.",
             "example": "proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "external_ref": {
+            "type": "string",
+            "nullable": true,
+            "description": "O `external_ref` do projeto (o identificador do cliente na plataforma parceira), ou `null` em um projeto que não tem um. Definido uma vez e nunca muda.",
+            "example": null
           },
           "sequence": {
             "type": "number",
@@ -3025,6 +4418,12 @@
               "authentication"
             ],
             "description": "Categoria: `marketing`, `utility` ou `authentication`."
+          },
+          "body_text": {
+            "type": "string",
+            "nullable": true,
+            "description": "O corpo do template, com os placeholders `{{1}}`, `{{2}}`, … É `null` só em um template importado e somente leitura (`read_only`), que a Routa não consegue reproduzir.",
+            "example": "Olá {{1}}! Seu pedido {{2}} foi confirmado."
           },
           "variables": {
             "type": "array",
@@ -3174,7 +4573,7 @@
                 }
               }
             },
-            "description": "Cabeçalho, rodapé e botões do template, quando existirem."
+            "description": "Cabeçalho, rodapé e botões do template. O campo é omitido, não vazio, em um template só com corpo."
           },
           "status": {
             "type": "string",
@@ -3188,7 +4587,7 @@
               "disabled",
               "failed"
             ],
-            "description": "Estado de aprovação. Somente `approved` permite enviar. `rejected` indica que o provedor analisou e recusou o template. `failed` indica que a Routa não conseguiu submetê-lo."
+            "description": "Estado de aprovação. Somente `approved` permite enviar. `rejected` indica que o provedor analisou e recusou o template. `failed` indica que a Routa não conseguiu submetê-lo. Um template `failed` ou `rejected` pode ser editado e reenviado no painel, e então volta a `submitted`."
           },
           "rejection_reason": {
             "type": "string",
@@ -3215,6 +4614,23 @@
             ],
             "nullable": true,
             "description": "Motivo da falha de submissão, quando `status` é `failed`. `null` nos demais status.",
+            "example": null
+          },
+          "failure_detail": {
+            "type": "string",
+            "nullable": true,
+            "description": "Só quando `status` é `failed` e o provedor explicou o motivo: a frase dele, escrita para uma pessoa e muitas vezes no idioma da conta. É texto informativo. Nunca compare com ele, use `failure_code`. `null` nos demais casos.",
+            "example": null
+          },
+          "deletion_requested": {
+            "type": "boolean",
+            "description": "`true` desde que uma exclusão foi aceita (feita no painel) até a Routa terminar de apagar o template no WhatsApp. Nesse intervalo o template não pode ser usado para enviar e uma mensagem que o cita retorna `422 template_not_sendable`. `false` nos demais casos.",
+            "example": false
+          },
+          "deletion_failure_detail": {
+            "type": "string",
+            "nullable": true,
+            "description": "Por que a última exclusão terminou sem apagar o template, na frase do provedor quando ele a deu. É texto informativo. `null` quando nenhuma exclusão falhou.",
             "example": null
           },
           "origin": {
@@ -3270,10 +4686,14 @@
           "name",
           "language",
           "category",
+          "body_text",
           "variables",
           "status",
           "rejection_reason",
           "failure_code",
+          "failure_detail",
+          "deletion_requested",
+          "deletion_failure_detail",
           "origin",
           "read_only",
           "unsupported_components",
@@ -3778,6 +5198,469 @@
           "project_id",
           "api_key_id",
           "scopes"
+        ]
+      },
+      "PartnerProject": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador do projeto.",
+            "example": "proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nome de exibição do projeto.",
+            "example": "Loja do Zé"
+          },
+          "external_ref": {
+            "type": "string",
+            "description": "Seu identificador do cliente. Único na organização e definido uma vez.",
+            "example": "lead_123"
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "live",
+              "test"
+            ],
+            "description": "Ambiente do projeto. Os projetos da API de parceiro sempre são `live`.",
+            "example": "live"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando o projeto foi criado.",
+            "example": "2026-09-04T13:22:41.031Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "external_ref",
+          "environment",
+          "created_at"
+        ]
+      },
+      "PartnerProjectList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartnerProject"
+            },
+            "description": "Projetos da página."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Indica se existem mais páginas."
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Cursor da próxima página, ou `null` na última."
+          }
+        },
+        "required": [
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "PartnerProjectDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador do projeto.",
+            "example": "proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "name": {
+            "type": "string",
+            "description": "Nome de exibição do projeto.",
+            "example": "Loja do Zé"
+          },
+          "external_ref": {
+            "type": "string",
+            "description": "Seu identificador do cliente.",
+            "example": "lead_123"
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "live",
+              "test"
+            ],
+            "description": "Ambiente do projeto.",
+            "example": "live"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando o projeto foi criado.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "status"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Identificador do canal.",
+                  "example": "chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "Estado do canal: `pending`, `active`, `degraded` ou `disabled`.",
+                  "example": "active"
+                }
+              }
+            },
+            "description": "Canais do projeto, em qualquer estado. Um canal `active` indica que o cliente concluiu a conexão."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "external_ref",
+          "environment",
+          "created_at",
+          "channels"
+        ]
+      },
+      "PartnerProjectDeleting": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Projeto que está sendo apagado.",
+            "example": "proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "deleting"
+            ],
+            "description": "Sempre `deleting`. O projeto continua lá, parcialmente apagado. Repita a chamada até receber `204`.",
+            "example": "deleting"
+          }
+        },
+        "required": [
+          "project_id",
+          "status"
+        ]
+      },
+      "PartnerChannelList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "project_id",
+                "external_ref",
+                "address",
+                "status",
+                "status_reason_code",
+                "connection_mode",
+                "disconnection_reason",
+                "created_at"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Identificador do canal.",
+                  "example": "chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+                },
+                "project_id": {
+                  "type": "string",
+                  "description": "Projeto dono do canal.",
+                  "example": "proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+                },
+                "external_ref": {
+                  "type": "string",
+                  "description": "O `external_ref` do projeto.",
+                  "example": "lead_123"
+                },
+                "address": {
+                  "type": "string",
+                  "description": "Endereço do canal, em E.164.",
+                  "example": "+5581988888888"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "active",
+                    "degraded",
+                    "disabled"
+                  ],
+                  "description": "Estado do canal: `pending`, `active`, `degraded` ou `disabled`.",
+                  "example": "active"
+                },
+                "status_reason_code": {
+                  "type": "string",
+                  "enum": [
+                    "provider_auth_repeated_failure",
+                    "disconnected_by_customer",
+                    "offboarded"
+                  ],
+                  "nullable": true,
+                  "description": "Por que o canal está `degraded` ou `disabled`: `provider_auth_repeated_failure` (`degraded`), `disconnected_by_customer` ou `offboarded` (`disabled`). `null` nos demais casos.",
+                  "example": null
+                },
+                "connection_mode": {
+                  "type": "string",
+                  "enum": [
+                    "cloud_api",
+                    "coexistence"
+                  ],
+                  "description": "Como o número foi conectado: `cloud_api` ou `coexistence` (o número continua no app do WhatsApp Business).",
+                  "example": "cloud_api"
+                },
+                "disconnection_reason": {
+                  "type": "string",
+                  "enum": [
+                    "account_disconnected",
+                    "business_downgrade",
+                    "change_number",
+                    "companion_inactivity",
+                    "primary_inactivity",
+                    "user_re_registered",
+                    "unknown"
+                  ],
+                  "nullable": true,
+                  "description": "O motivo que o provedor deu para a desconexão: `account_disconnected`, `business_downgrade`, `change_number`, `companion_inactivity`, `primary_inactivity`, `user_re_registered` ou `unknown`. `null` quando não houve desconexão.",
+                  "example": null
+                },
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string",
+                  "description": "Quando o canal foi criado.",
+                  "example": "2026-09-04T13:22:41.031Z"
+                }
+              }
+            },
+            "description": "Canais da página."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Indica se existem mais páginas."
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Cursor da próxima página, ou `null` na última."
+          }
+        },
+        "required": [
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "PartnerProjectApiKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador da chave.",
+            "example": "key_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Projeto ao qual a chave pertence.",
+            "example": "proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "description": "Nome que você deu à chave, ou `null`.",
+            "example": "Loja do Zé"
+          },
+          "key_prefix": {
+            "type": "string",
+            "description": "Primeiros caracteres da chave, seguros para exibir.",
+            "example": "rt_live_abc"
+          },
+          "last_four": {
+            "type": "string",
+            "description": "Últimos quatro caracteres da chave.",
+            "example": "k3xQ"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "messages:read",
+                "messages:write",
+                "channels:read",
+                "channels:write",
+                "events:read",
+                "webhooks:write",
+                "usage:read",
+                "templates:read",
+                "templates:write",
+                "media:read",
+                "media:write"
+              ]
+            },
+            "description": "Escopos concedidos à chave do projeto."
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando a chave expira, ou `null` se ela não expira."
+          },
+          "ip_allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Endereços IP ou blocos CIDR permitidos. Uma lista vazia não restringe."
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando a chave foi criada.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando a chave foi revogada, ou `null` enquanto está ativa."
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Último uso da chave, arredondado para o minuto, ou `null`."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "key_prefix",
+          "last_four",
+          "scopes",
+          "expires_at",
+          "ip_allowlist",
+          "created_at",
+          "revoked_at",
+          "last_used_at"
+        ]
+      },
+      "PartnerProjectApiKeyWithSecret": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identificador da chave.",
+            "example": "key_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Projeto ao qual a chave pertence.",
+            "example": "proj_01J8ZK9M3Q7XABCDEFGHJKMNPQ"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "description": "Nome que você deu à chave, ou `null`.",
+            "example": "Loja do Zé"
+          },
+          "key_prefix": {
+            "type": "string",
+            "description": "Primeiros caracteres da chave, seguros para exibir.",
+            "example": "rt_live_abc"
+          },
+          "last_four": {
+            "type": "string",
+            "description": "Últimos quatro caracteres da chave.",
+            "example": "k3xQ"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "messages:read",
+                "messages:write",
+                "channels:read",
+                "channels:write",
+                "events:read",
+                "webhooks:write",
+                "usage:read",
+                "templates:read",
+                "templates:write",
+                "media:read",
+                "media:write"
+              ]
+            },
+            "description": "Escopos concedidos à chave do projeto."
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando a chave expira, ou `null` se ela não expira."
+          },
+          "ip_allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Endereços IP ou blocos CIDR permitidos. Uma lista vazia não restringe."
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Quando a chave foi criada.",
+            "example": "2026-09-04T13:22:41.031Z"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Quando a chave foi revogada, ou `null` enquanto está ativa."
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Último uso da chave, arredondado para o minuto, ou `null`."
+          },
+          "secret": {
+            "type": "string",
+            "description": "A chave de API completa. Exibida **apenas agora**. Guarde-a com segurança.",
+            "example": "rt_live_..."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "key_prefix",
+          "last_four",
+          "scopes",
+          "expires_at",
+          "ip_allowlist",
+          "created_at",
+          "revoked_at",
+          "last_used_at",
+          "secret"
         ]
       }
     }

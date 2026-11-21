@@ -4,6 +4,21 @@
 const ID = (prefix) => `${prefix}_01J8ZK9M3Q7XABCDEFGHJKMNPQ`
 const TS = '2026-09-04T13:22:41.031Z'
 
+// Status copy shared by every `/v1/partner/*` operation. These routes answer to a partner key, not to a project key.
+const PARTNER_STATUSES = {
+  401: 'Chave de parceiro ausente, inválida, revogada, expirada ou fora da lista de IPs permitidos (`partner_key_invalid`). Uma chave de projeto também recebe este erro',
+  403: 'A chave de parceiro não tem o escopo necessário (`insufficient_scope`)',
+  404: 'O recurso não existe, não pertence à sua organização ou não foi criado pela API de parceiro. Também retorna `partner_api_not_available` quando o plano não inclui a API de parceiro',
+  429: 'Limite de taxa excedido: 10 requisições por segundo, com rajadas de até 30, por organização. Veja o header `Retry-After`',
+}
+
+const PARTNER_LIMIT = { maximum: 200, default: 50 }
+const PARTNER_PAGE_PARAMS = {
+  limit: 'Quantidade de itens por página, de 1 a 200. O padrão é 50.',
+  cursor: 'Valor de `next_cursor` da página anterior. Trate-o como opaco.',
+}
+const PARTNER_PROJECT_ID = 'Identificador do projeto (`proj_...`). Só vale para um projeto criado pela API de parceiro.'
+
 export const COPY = {
   info: {
     title: 'API da Routa',
@@ -20,12 +35,18 @@ export const COPY = {
     { name: 'Mídia', description: 'Envie e obtenha arquivos de mídia.' },
     { name: 'Uso', description: 'Consulte o uso medido do projeto.' },
     { name: 'Identidade', description: 'Identifique a chave de API em uso.' },
+    {
+      name: 'Parceiros',
+      description:
+        'Crie um projeto por cliente, emita a chave de cada projeto, acompanhe os canais e receba os eventos de todos os clientes em um só webhook. Estas rotas usam uma chave de parceiro (`rt_partner_...`). Veja [API de parceiro](/partners/overview).',
+    },
   ],
 
   statuses: {
     200: 'Sucesso',
     201: 'Recurso criado',
     202: 'Aceito. O processamento é assíncrono',
+    204: 'Sem conteúdo. A operação foi concluída',
     401: 'Chave de API ausente, inválida, revogada ou expirada (`api_key_invalid`)',
     402: 'Franquia ou limite do plano esgotado (`message_quota_exceeded`, `free_messages_exhausted`, `subscription_required`, `payment_failed`)',
     403: 'A chave não tem o escopo necessário (`insufficient_scope`)',
@@ -73,6 +94,19 @@ export const COPY = {
     'GET /v1/media/{id}',
     'GET /v1/usage',
     'GET /v1/whoami',
+    'POST /v1/partner/projects',
+    'GET /v1/partner/projects',
+    'GET /v1/partner/projects/{projectId}',
+    'PATCH /v1/partner/projects/{projectId}',
+    'DELETE /v1/partner/projects/{projectId}',
+    'POST /v1/partner/projects/{projectId}/api_keys',
+    'POST /v1/partner/projects/{projectId}/api_keys/{id}/rotate',
+    'POST /v1/partner/projects/{projectId}/api_keys/{id}/revoke',
+    'GET /v1/partner/channels',
+    'DELETE /v1/partner/projects/{projectId}/channels/{channelId}',
+    'GET /v1/partner/webhook',
+    'PUT /v1/partner/webhook',
+    'POST /v1/partner/webhook/rotate_secret',
   ],
 
   operations: {
@@ -116,7 +150,7 @@ export const COPY = {
       scope: 'messages:read',
       summary: 'Listar mensagens',
       description:
-        'Lista as mensagens do projeto, da mais recente para a mais antiga, com paginação por cursor. Filtre por `direction` para ver só as recebidas ou só as enviadas.',
+        'Lista as mensagens do projeto, da mais recente para a mais antiga, com paginação por cursor. Filtre por `direction` para ver só as recebidas ou só as enviadas.\n\nEm um número conectado em modo de coexistência, a lista inclui as mensagens que a empresa enviou pelo app do WhatsApp Business (`origin: business_app`) e o histórico importado. Uma mensagem com conteúdo mais antigo que a retenção do plano vem com `content: null` e `content_redacted_at`.',
     },
     'GET /v1/messages/{id}': {
       id: 'retrieveMessage',
@@ -142,7 +176,8 @@ export const COPY = {
       scope: 'events:read',
       summary: 'Listar eventos',
       description:
-        'Lista os eventos do projeto em ordem crescente de `sequence`, do mais antigo para o mais recente. É o caminho de **reconciliação** para quem perdeu entregas de webhook: guarde o `id` do último evento processado e passe-o em `after`.\n\nOs eventos ficam disponíveis por 90 dias. Veja [Reconciliar eventos](/webhooks/reconciliation).',
+        'Lista os eventos do projeto em ordem crescente de `sequence`, do mais antigo para o mais recente. É o caminho de **reconciliação** para quem perdeu entregas de webhook: guarde o `id` do último evento processado e passe-o em `after`.\n\nOs eventos ficam disponíveis por 90 dias. Veja [Reconciliar eventos](/webhooks/reconciliation).\n\nCada evento traz o `external_ref` do projeto, que é `null` quando o projeto não tem um.',
+      params: { type: 'Filtra por tipo de evento, por exemplo `message.delivered` ou `template.deleted`.' },
     },
     'POST /v1/webhook_endpoints': {
       id: 'createWebhookEndpoint',
@@ -250,17 +285,17 @@ export const COPY = {
       scope: 'templates:write',
       summary: 'Submeter template',
       description:
-        'Cria um template e o envia ao WhatsApp para aprovação. A aprovação é decidida pelo provedor, no tempo dele. Acompanhe pelos eventos `template.*` ou consultando o template.\n\nSomente templates `approved` podem ser usados em `POST /v1/messages`. Veja [Templates](/concepts/templates).',
+        'Cria um template e o envia ao WhatsApp para aprovação. A aprovação é decidida pelo provedor, no tempo dele. Acompanhe pelos eventos `template.*` ou consultando o template.\n\nSomente templates `approved` podem ser usados em `POST /v1/messages`. Veja [Templates](/concepts/templates).\n\nA Routa recusa **na hora**, com `422`, o que o WhatsApp já é conhecido por recusar. Assim o erro chega no campo certo, em vez de um template `failed` minutos depois. O campo `error.param` diz qual parte da requisição falhou.\n\n| Regra | Erro e `error.param` |\n| --- | --- |\n| O nome usa só `a-z`, `0-9` e `_`, até 512 caracteres | `template_name_invalid`, `name` |\n| O corpo tem até 1024 caracteres | `template_components_invalid`, `body_text` |\n| O corpo não começa nem termina com uma variável `{{n}}` | `template_variables_invalid` |\n| O cabeçalho de texto tem até 60 caracteres e uma variável | `template_components_invalid`, `components.header` |\n| O rodapé tem até 60 caracteres | `template_components_invalid`, `components.footer` |\n| No máximo 10 botões, 1 de telefone e 2 de URL | `template_components_invalid`, `components.buttons` |\n| Os botões de resposta rápida ficam juntos, sem outros botões no meio | `template_components_invalid`, `components.buttons` |\n| O texto do botão tem até 25 caracteres, a URL até 2000 e o telefone até 20 | `template_components_invalid`, `components.buttons` |\n| A variável `{{1}}` de uma URL fica no fim dela, e a URL não aponta para `api.whatsapp.com` | `template_components_invalid`, `components.buttons` |\n| Um template `authentication` não aceita botões próprios | `template_components_invalid`, `components.buttons` |\n\nO WhatsApp decide a aprovação. Uma regra que a Routa não verifica ainda pode levar a `rejected` ou `failed`.',
       requestNotes: {
         channel: { description: 'Canal ao qual o template pertence (`chan_...`).', example: 'chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ' },
-        name: { description: 'Nome do template.', example: 'confirmacao_pedido' },
+        name: { description: 'Nome do template: só letras minúsculas, dígitos e `_` (`a-z`, `0-9`, `_`), até 512 caracteres.', example: 'confirmacao_pedido' },
         language: { description: 'Código de idioma, por exemplo `pt_BR` ou `en_US`.', example: 'pt_BR' },
         category: 'Categoria do template: `marketing`, `utility` ou `authentication`.',
-        body_text: { description: 'Corpo do template, com placeholders posicionais `{{1}}`, `{{2}}`, …', example: 'Olá {{1}}! Seu pedido {{2}} foi confirmado.' },
+        body_text: { description: 'Corpo do template, com placeholders posicionais `{{1}}`, `{{2}}`, …, até 1024 caracteres. Não pode começar nem terminar com uma variável.', example: 'Olá {{1}}! Seu pedido {{2}} foi confirmado.' },
         components: 'Componentes opcionais: cabeçalho de texto ou de mídia, rodapé e até 10 botões. Omita o campo para um template só de texto.',
         'components.header': 'Cabeçalho de texto (até 60 caracteres e uma variável) ou de mídia (um `media_id` de `POST /v1/templates/media`).',
         'components.footer': 'Rodapé em texto, com até 60 caracteres.',
-        'components.buttons': 'Até 10 botões. No máximo um botão `phone_number`. O texto de cada botão tem até 25 caracteres, e a URL de um botão `url` pode ter uma variável `{{1}}`.',
+        'components.buttons': 'Até 10 botões: no máximo 1 `phone_number` e 2 `url`. Os `quick_reply` ficam juntos, antes ou depois dos outros. O texto de cada botão tem até 25 caracteres. A URL de um botão `url` tem até 2000 caracteres e pode ter uma variável `{{1}}`, que só pode ficar no fim da URL.',
       },
       requestExample: {
         channel: 'chan_01J8ZK9M3Q7XABCDEFGHJKMNPQ',
@@ -276,7 +311,7 @@ export const COPY = {
       scope: 'templates:read',
       summary: 'Listar templates',
       description:
-        'Lista os templates do projeto com paginação por cursor. Filtre por canal com `channel`. A listagem inclui os templates importados do WhatsApp (`origin: provider`), inclusive os somente leitura (`read_only: true`), que não podem ser usados para enviar.',
+        'Lista os templates do projeto com paginação por cursor. Filtre por canal com `channel`. A listagem inclui os templates importados do WhatsApp (`origin: provider`), inclusive os somente leitura (`read_only: true`), que não podem ser usados para enviar. Editar e excluir um template é feito no painel.',
     },
     'GET /v1/templates/{id}': {
       id: 'retrieveTemplate',
@@ -284,7 +319,7 @@ export const COPY = {
       scope: 'templates:read',
       summary: 'Consultar template',
       description:
-        'Retorna um template com o `status` de aprovação atual. Se ele foi rejeitado, `rejection_reason` indica o motivo. Se a Routa não conseguiu submetê-lo (`status: failed`), `failure_code` indica o motivo e é preciso criar o template de novo.',
+        'Retorna um template com o `status` de aprovação atual. Se ele foi rejeitado, `rejection_reason` indica o motivo. Se a Routa não conseguiu submetê-lo (`status: failed`), `failure_code` indica o motivo e `failure_detail` traz a frase do provedor, quando ele a deu. Pela API, é preciso criar o template de novo. No painel, um template `failed` ou `rejected` pode ser editado e reenviado.\n\nQuando uma exclusão feita no painel está em andamento, `deletion_requested` é `true` e o template não pode ser usado para enviar.',
       params: { id: 'Identificador do template (`tmpl_...`).' },
     },
     'POST /v1/templates/media': {
@@ -361,6 +396,212 @@ export const COPY = {
       description:
         'Resolve a chave de API em uso para a organização, o projeto e os escopos que ela possui. Não tem efeitos colaterais e aceita qualquer chave válida, o que o torna ideal para verificar uma chave.',
     },
+
+    'POST /v1/partner/projects': {
+      id: 'createPartnerProject',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'projects:write',
+      statuses: {
+        200: 'Já existia um projeto com este `external_ref`. Ele é devolvido sem alteração',
+        201: 'Projeto criado',
+        402: 'O limite de projetos do plano foi atingido (`project_limit_exceeded`, com `error.details.limit`)',
+        ...PARTNER_STATUSES,
+        422: 'Requisição inválida (`invalid_project_name`, `invalid_external_ref`)',
+      },
+      summary: 'Criar projeto de um cliente',
+      description:
+        'Cria o projeto de um cliente seu. Use **um projeto por cliente**.\n\nO `external_ref` é o **seu** identificador do cliente. Ele é único na organização e não muda depois. Repetir a chamada com o mesmo `external_ref` não cria um segundo projeto: a API devolve o existente com `200`, e o `name` enviado é ignorado. A primeira chamada retorna `201`.\n\nCriar o projeto é opcional: o primeiro [link assinado](/partners/signed-link) de um cliente também o cria. O projeto sempre nasce em produção (`environment: live`).\n\nO plano limita o número de projetos. Ao atingir o limite, a API retorna `402 project_limit_exceeded`. Apagar um projeto de um cliente que saiu devolve a vaga.',
+      requestNotes: {
+        name: { description: 'Nome do projeto, de 1 a 200 caracteres. Aparece para o cliente na página de conexão. É um nome de exibição, não uma identidade.', example: 'Loja do Zé' },
+        external_ref: { description: 'Seu identificador do cliente: de 1 a 128 caracteres entre `A-Z`, `a-z`, `0-9`, `.`, `_`, `:` e `-`. Nunca use e-mail, telefone ou nome. É único na organização e definido uma vez.', example: 'lead_123' },
+      },
+      requestExample: { name: 'Loja do Zé', external_ref: 'lead_123' },
+    },
+    'GET /v1/partner/projects': {
+      id: 'listPartnerProjects',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'projects:read',
+      statuses: { ...PARTNER_STATUSES, 422: 'Requisição inválida (`invalid_cursor`, `invalid_external_ref`)' },
+      limit: PARTNER_LIMIT,
+      summary: 'Listar projetos',
+      description:
+        'Lista os projetos criados pela API de parceiro, com paginação por cursor. Os projetos que a sua equipe criou no painel não aparecem.\n\nFiltre por `external_ref` para achar o projeto de um cliente, ou por `has_channel` para separar quem já conectou um número de quem ainda não conectou.',
+      params: {
+        external_ref: 'Devolve só o projeto que tem este `external_ref`. Uma página vazia quando nenhum projeto o tem.',
+        has_channel: 'Use `false` para os projetos sem nenhum canal e `true` para os que têm algum, em qualquer estado. Um projeto que só tem canais desativados **não** é um projeto sem canal. Qualquer outro valor retorna `422`.',
+        ...PARTNER_PAGE_PARAMS,
+      },
+    },
+    'GET /v1/partner/projects/{projectId}': {
+      id: 'retrievePartnerProject',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'projects:read',
+      statuses: { ...PARTNER_STATUSES },
+      summary: 'Consultar projeto',
+      description:
+        'Retorna o projeto com o seu `external_ref` e os canais dele (`id` e `status`).\n\nÉ **esta** consulta, e não o redirecionamento do link assinado, que confirma uma conexão. O redirecionamento é apenas uma dica: qualquer pessoa pode forjar uma requisição para o seu `redirect_url`. Veja o [guia de onboarding](/partners/onboarding).',
+      params: { projectId: PARTNER_PROJECT_ID },
+    },
+    'PATCH /v1/partner/projects/{projectId}': {
+      id: 'updatePartnerProject',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'projects:write',
+      statuses: { ...PARTNER_STATUSES, 422: 'Requisição inválida (`invalid_project_name`, `external_ref_immutable`)' },
+      summary: 'Renomear projeto',
+      description:
+        'Renomeia o projeto. O `external_ref` **não pode mudar**: enviar o valor atual é aceito, e qualquer outro valor retorna `422 external_ref_immutable`.',
+      requestNotes: {
+        name: { description: 'Novo nome de exibição, de 1 a 200 caracteres.', example: 'Loja do Zé Ltda' },
+        external_ref: 'Aceito só para ser recusado. Envie o valor atual ou omita o campo.',
+      },
+      requestExample: { name: 'Loja do Zé Ltda' },
+      params: { projectId: PARTNER_PROJECT_ID },
+    },
+    'DELETE /v1/partner/projects/{projectId}': {
+      id: 'deletePartnerProject',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'projects:delete',
+      statuses: {
+        202: 'A exclusão ainda não terminou. Repita a chamada até receber `204`',
+        204: 'O projeto foi apagado',
+        ...PARTNER_STATUSES,
+        409: 'O projeto não pode ser apagado (`project_not_deletable`). `error.details.reason` é `has_enabled_channel` ou `last_project`',
+      },
+      summary: 'Apagar projeto',
+      description:
+        'Apaga o projeto de um cliente e tudo o que ele contém, para devolver a vaga ao limite de projetos do plano. Um link abandonado ou um cliente que saiu continuam contando até você apagar o projeto.\n\nExige o escopo `projects:delete`, que **não** vem em uma chave nova. Vale só para um projeto criado pela API de parceiro.\n\nA API apaga mensagens, templates, eventos, contatos, chaves, endpoints de webhook, arquivos de mídia e os canais **desativados** do projeto. Os números desses canais ficam livres. O plano, a franquia, o registro de auditoria e as chaves de parceiro da organização não mudam. Nada muda no WhatsApp.\n\nO projeto não pode ser apagado quando ainda tem um canal que não está desativado (`has_enabled_channel`) nem quando é o último projeto da organização (`last_project`). Nos dois casos a resposta é `409 project_not_deletable`.\n\nA resposta é `204` quando o projeto sumiu. Em um projeto grande, a chamada pode apagar só uma parte e retornar `202` com `status: deleting`. O projeto continua lá, parcialmente apagado. **Repita a mesma chamada até receber `204`.**',
+      params: { projectId: PARTNER_PROJECT_ID },
+    },
+    'POST /v1/partner/projects/{projectId}/api_keys': {
+      id: 'createPartnerProjectApiKey',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'api_keys:write',
+      statuses: {
+        201: 'Chave criada. O `secret` aparece uma única vez',
+        ...PARTNER_STATUSES,
+        422: 'Requisição inválida (`invalid_api_key_name`)',
+      },
+      summary: 'Emitir chave de API do projeto',
+      description:
+        'Emite a chave de API de um projeto. É **esta** chave, e não a chave de parceiro, que o tráfego do cliente usa em `/v1/messages`, `/v1/templates` e nas demais rotas. A chave de parceiro nunca envia mensagens.\n\nO `secret` é exibido **uma única vez**, na resposta. Guarde-o com segurança.\n\nExige o escopo `api_keys:write`, que **não** vem em uma chave de parceiro nova. Uma chave de parceiro vazada com esse escopo pode emitir chaves que enviam mensagens para qualquer cliente seu. Restrinja-a aos endereços dos seus servidores e defina uma expiração.\n\nPeça o menor conjunto de escopos que funciona. Os escopos de uma chave de projeto estão em [Autenticação](/authentication). Valores desconhecidos são ignorados, e `scopes: []` gera uma chave que não pode fazer nada.',
+      requestNotes: {
+        name: { description: 'Como você chama esta chave, por exemplo `Backend do cliente 123`. No máximo 80 caracteres, depois de remover os espaços das pontas.', example: 'Loja do Zé' },
+        scopes: { description: 'Escopos da chave do projeto. Peça apenas os necessários.', example: ['messages:write', 'messages:read'] },
+        expires_at: 'Quando a chave expira, em ISO 8601. Sem este campo, a chave não expira.',
+        ip_allowlist: 'Endereços IPv4 ou blocos CIDR IPv4 que podem usar a chave. Endereços IPv6 são comparados como texto exato. Uma lista vazia não restringe.',
+      },
+      requestExample: { name: 'Loja do Zé', scopes: ['messages:write', 'messages:read'] },
+      params: { projectId: PARTNER_PROJECT_ID },
+    },
+    'POST /v1/partner/projects/{projectId}/api_keys/{id}/rotate': {
+      id: 'rotatePartnerProjectApiKey',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'api_keys:write',
+      statuses: { 201: 'Chave nova criada. O `secret` aparece uma única vez', ...PARTNER_STATUSES },
+      summary: 'Rotacionar chave de API do projeto',
+      description:
+        'Cria uma chave de substituição para a chave informada. A chave original **continua ativa** até você revogá-la, então dá para trocar a chave no seu sistema sem interromper o envio. A resposta traz o `secret` da chave nova, exibido uma única vez.',
+      params: {
+        projectId: PARTNER_PROJECT_ID,
+        id: 'Identificador da chave de API do projeto (`key_...`).',
+      },
+    },
+    'POST /v1/partner/projects/{projectId}/api_keys/{id}/revoke': {
+      id: 'revokePartnerProjectApiKey',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'api_keys:write',
+      statuses: { 200: 'Chave revogada. O `revoked_at` indica quando', ...PARTNER_STATUSES },
+      summary: 'Revogar chave de API do projeto',
+      description:
+        'Revoga a chave. Ela deixa de funcionar na hora. Use depois de [rotacionar](/api-reference/endpoint/partner/rotate-project-api-key) uma chave, ou quando um cliente sair.',
+      params: {
+        projectId: PARTNER_PROJECT_ID,
+        id: 'Identificador da chave de API do projeto (`key_...`).',
+      },
+    },
+    'GET /v1/partner/channels': {
+      id: 'listPartnerChannels',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'projects:read',
+      statuses: { ...PARTNER_STATUSES, 422: 'Requisição inválida (`status` desconhecido, `invalid_cursor`, `invalid_external_ref`)' },
+      limit: PARTNER_LIMIT,
+      summary: 'Listar canais dos clientes',
+      description:
+        'Lista, em uma chamada, os canais de todos os seus clientes, em qualquer estado (`pending`, `active`, `degraded` e `disabled`). Cada canal traz o `external_ref` do projeto dele.\n\nUm canal `disabled` impede que o projeto seja apagado e continua ocupando o número. Para liberar o número, [apague o canal](/api-reference/endpoint/partner/delete-channel).\n\nO item não traz credenciais nem dados do provedor.',
+      params: {
+        status: 'Devolve só os canais neste estado: `pending`, `active`, `degraded` ou `disabled`. Qualquer outro valor retorna `422`.',
+        project_id: 'Devolve só os canais deste projeto (`proj_...`). Uma página vazia quando a organização não tem o projeto.',
+        external_ref: 'Devolve só os canais do projeto que tem este `external_ref`. Uma página vazia quando nenhum projeto o tem.',
+        ...PARTNER_PAGE_PARAMS,
+      },
+    },
+    'DELETE /v1/partner/projects/{projectId}/channels/{channelId}': {
+      id: 'deletePartnerChannel',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'channels:write',
+      statuses: {
+        204: 'O canal foi apagado',
+        ...PARTNER_STATUSES,
+        409: 'O canal não está desativado (`channel_not_disabled`)',
+      },
+      summary: 'Apagar canal desativado',
+      description:
+        'Apaga um canal **desativado** de um projeto seu, para liberar o número e o cliente poder conectá-lo de novo.\n\nExige o escopo `channels:write`, que **não** vem em uma chave de parceiro nova. Um canal em qualquer outro estado retorna `409 channel_not_disabled`.\n\nA API apaga o canal, a credencial e os templates dele. As mensagens, o uso e os eventos continuam citando o canal. Nada muda no WhatsApp.',
+      params: {
+        projectId: PARTNER_PROJECT_ID,
+        channelId: 'Identificador do canal (`chan_...`).',
+      },
+    },
+    'GET /v1/partner/webhook': {
+      id: 'retrievePartnerWebhook',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'webhooks:write',
+      statuses: { 200: 'Sucesso', ...PARTNER_STATUSES, 404: 'A organização ainda não configurou o webhook (`webhook_endpoint_not_found`), ou o plano não inclui a API de parceiro (`partner_api_not_available`)' },
+      summary: 'Consultar webhook da organização',
+      description:
+        'Retorna o único endpoint de webhook da organização, com `status`, `consecutive_failures` e os horários do último sucesso e da última falha. O segredo nunca é retornado.\n\nNão existe um escopo só de leitura: a rota usa `webhooks:write`.',
+    },
+    'PUT /v1/partner/webhook': {
+      id: 'setPartnerWebhook',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'webhooks:write',
+      statuses: {
+        200: 'Endpoint atualizado e reativado. A resposta não traz o segredo',
+        201: 'Endpoint criado. O `secret` aparece uma única vez',
+        ...PARTNER_STATUSES,
+        422: 'Requisição inválida (`invalid_webhook_url`, `invalid_subscribed_types`)',
+      },
+      summary: 'Configurar webhook da organização',
+      description:
+        'Configura o **único** endpoint de webhook da organização, que recebe os eventos de **todos** os seus clientes. Cada evento traz o `project_id` e o `external_ref` do projeto, então você roteia pelo seu próprio identificador, sem manter uma tabela.\n\nA primeira chamada cria o endpoint e retorna `201` com o `secret` de assinatura, **exibido uma única vez**. As chamadas seguintes (`200`) substituem a URL e os tipos assinados, reativam o endpoint e não retornam o segredo.\n\nAs assinaturas e as tentativas seguem as regras dos [webhooks](/webhooks/overview) de um projeto. Você pode manter também endpoints em projetos individuais: nesse caso, recebe as duas entregas.\n\nUm endpoint que carrega muitos clientes é o gargalo de todos eles. Ele tem no máximo 32 entregas simultâneas (8 em um endpoint de projeto), então responda rápido e enfileire o trabalho do seu lado. Veja [Webhook da organização](/partners/webhook).',
+      requestNotes: {
+        url: { description: 'URL HTTPS que recebe os eventos de todos os projetos da organização. O endereço precisa resolver para um host público.', example: 'https://crm.exemplo.com/routa' },
+        subscribed_types: { description: 'Tipos de evento ou curingas por recurso (`message.*`, `channel.*`, `template.*`). Pelo menos um. O curinga `*` sozinho não é aceito.', example: ['message.*', 'channel.status_changed'] },
+      },
+      requestExample: { url: 'https://crm.exemplo.com/routa', subscribed_types: ['message.*', 'channel.status_changed'] },
+    },
+    'POST /v1/partner/webhook/rotate_secret': {
+      id: 'rotatePartnerWebhookSecret',
+      tag: 'Parceiros',
+      auth: 'partner',
+      scope: 'webhooks:write',
+      statuses: { 201: 'Segredo novo gerado. Ele aparece uma única vez', ...PARTNER_STATUSES, 404: 'A organização ainda não configurou o webhook (`webhook_endpoint_not_found`), ou o plano não inclui a API de parceiro (`partner_api_not_available`)' },
+      summary: 'Rotacionar segredo do webhook',
+      description:
+        'Gera um novo segredo de assinatura e o retorna, **uma única vez**. O segredo anterior continua assinando as entregas por **24 horas**, então você troca o segredo no seu sistema sem perder eventos. Veja [Verificar assinaturas](/webhooks/signatures).',
+    },
   },
 
   schemas: {
@@ -379,7 +620,7 @@ export const COPY = {
         description: 'Texto para humanos, em inglês. Pode mudar, então não faça parse dele.',
         example: 'Channel chan_01J8... is not active and cannot send messages.',
       },
-      'error.param': 'O campo da requisição com problema, quando se aplica.',
+      'error.param': { description: 'O campo da requisição com problema, quando se aplica. Hoje vem preenchido nos erros de template: `name` em `template_name_invalid`, e `body_text`, `components.header`, `components.footer` ou `components.buttons` em `template_components_invalid`. É o componente, não o item dentro dele.', example: 'components.buttons' },
       'error.doc_url': 'Link para a documentação do código, quando disponível.',
       'error.details': 'Valores acionáveis, como `limit`, `used` e `resets_at` em `message_quota_exceeded`, ou `limit` e `used` em `free_messages_exhausted`.',
       'error.request_id': {
@@ -390,13 +631,14 @@ export const COPY = {
     Message: {
       id: { description: 'Identificador da mensagem.', example: ID('msg') },
       channel: { description: 'Identificador do canal usado.', example: ID('chan') },
-      direction: 'Direção da mensagem: `outbound` (enviada por você) ou `inbound` (recebida).',
+      direction: 'Direção da mensagem: `outbound` (saiu do número do canal, pela API ou pelo app do WhatsApp Business) ou `inbound` (recebida).',
+      origin: { description: 'De onde veio uma mensagem `outbound`: `api` (enviada pela Routa) ou `business_app` (a empresa enviou pelo app do WhatsApp Business, em um número conectado em modo de coexistência). Uma mensagem `business_app` não é cobrada nem entra no uso. É `null` em uma mensagem `inbound`.', example: 'api' },
       from: { description: 'Endereço de origem, em E.164.', example: '+5581988888888' },
-      to: { description: 'Endereço de destino, em E.164.', example: '+5581999999999' },
+      to: { description: 'Endereço de destino, em E.164. Em uma mensagem `business_app`, pode ser um identificador do provedor quando o número do destinatário não é conhecido.', example: '+5581999999999' },
       content: 'Conteúdo da mensagem. O campo `type` indica o formato. É `null` depois que a retenção remove o conteúdo; nesse caso `content_redacted_at` traz o momento da remoção.',
       content_redacted_at: { description: 'Quando a retenção removeu o conteúdo da mensagem. `null` enquanto a mensagem ainda tem o conteúdo.', example: null },
       status: 'Estado atual no ciclo de vida. O status nunca retrocede.',
-      failure_code: { description: 'Motivo da falha, de um conjunto fechado de códigos da Routa. `null` até a mensagem falhar.', example: null },
+      failure_code: { description: 'Motivo da falha, de um conjunto fechado de códigos da Routa, nunca um código do provedor. `null` até a mensagem falhar.', example: null },
       metadata: 'Até 20 pares chave-valor de texto, de propriedade do cliente.',
       accepted_at: { description: 'Quando a Routa aceitou a mensagem.', example: TS },
       sent_at: { description: 'Quando o provedor aceitou a mensagem. `null` se ainda não ocorreu.', example: TS },
@@ -415,6 +657,7 @@ export const COPY = {
       api_version: { description: 'Versão do formato público do recurso em `data`.', example: 'v1' },
       schema_version: { description: 'Versão do envelope do evento.', example: 1 },
       project_id: { description: 'Projeto dono do evento.', example: ID('proj') },
+      external_ref: { description: 'O `external_ref` do projeto (o identificador do cliente na plataforma parceira), ou `null` em um projeto que não tem um. Definido uma vez e nunca muda.', example: null },
       sequence: 'Número monotônico, útil para detectar lacunas. Não é uma promessa de ordem de entrega.',
       occurred_at: { description: 'Quando o fato ocorreu.', example: TS },
       recorded_at: { description: 'Quando a Routa registrou o evento.', example: TS },
@@ -431,11 +674,15 @@ export const COPY = {
       name: { description: 'Nome do template.', example: 'confirmacao_pedido' },
       language: { description: 'Código de idioma.', example: 'pt_BR' },
       category: 'Categoria: `marketing`, `utility` ou `authentication`.',
+      body_text: { description: 'O corpo do template, com os placeholders `{{1}}`, `{{2}}`, … É `null` só em um template importado e somente leitura (`read_only`), que a Routa não consegue reproduzir.', example: 'Olá {{1}}! Seu pedido {{2}} foi confirmado.' },
       variables: 'Placeholders posicionais do corpo (`{{1}}`, `{{2}}`, …).',
-      components: 'Cabeçalho, rodapé e botões do template, quando existirem.',
-      status: 'Estado de aprovação. Somente `approved` permite enviar. `rejected` indica que o provedor analisou e recusou o template. `failed` indica que a Routa não conseguiu submetê-lo.',
+      components: 'Cabeçalho, rodapé e botões do template. O campo é omitido, não vazio, em um template só com corpo.',
+      status: 'Estado de aprovação. Somente `approved` permite enviar. `rejected` indica que o provedor analisou e recusou o template. `failed` indica que a Routa não conseguiu submetê-lo. Um template `failed` ou `rejected` pode ser editado e reenviado no painel, e então volta a `submitted`.',
       rejection_reason: 'Motivo da rejeição, quando `status` é `rejected`.',
       failure_code: { description: 'Motivo da falha de submissão, quando `status` é `failed`. `null` nos demais status.', example: null },
+      failure_detail: { description: 'Só quando `status` é `failed` e o provedor explicou o motivo: a frase dele, escrita para uma pessoa e muitas vezes no idioma da conta. É texto informativo. Nunca compare com ele, use `failure_code`. `null` nos demais casos.', example: null },
+      deletion_requested: { description: '`true` desde que uma exclusão foi aceita (feita no painel) até a Routa terminar de apagar o template no WhatsApp. Nesse intervalo o template não pode ser usado para enviar e uma mensagem que o cita retorna `422 template_not_sendable`. `false` nos demais casos.', example: false },
+      deletion_failure_detail: { description: 'Por que a última exclusão terminou sem apagar o template, na frase do provedor quando ele a deu. É texto informativo. `null` quando nenhuma exclusão falhou.', example: null },
       origin: { description: 'Quem criou o template: `routa` para um template submetido pela Routa, `provider` para um que já existia no WhatsApp e foi importado.', example: 'routa' },
       read_only: { description: '`true` para um template importado que a Routa não consegue reproduzir. Enviar uma mensagem com ele retorna `422 template_not_sendable`. Sempre `false` quando `origin` é `routa`.', example: false },
       unsupported_components: { description: 'Componentes de um template importado que a Routa não consegue reproduzir. Vazia quando `read_only` é `false`.', example: [] },
@@ -527,6 +774,73 @@ export const COPY = {
       project_id: { description: 'Projeto ao qual a chave pertence.', example: ID('proj') },
       api_key_id: { description: 'Identificador da chave.', example: ID('key') },
       scopes: 'Escopos concedidos à chave.',
+    },
+    PartnerProject: {
+      id: { description: 'Identificador do projeto.', example: ID('proj') },
+      name: { description: 'Nome de exibição do projeto.', example: 'Loja do Zé' },
+      external_ref: { description: 'Seu identificador do cliente. Único na organização e definido uma vez.', example: 'lead_123' },
+      environment: { description: 'Ambiente do projeto. Os projetos da API de parceiro sempre são `live`.', example: 'live' },
+      created_at: { description: 'Quando o projeto foi criado.', example: TS },
+    },
+    PartnerProjectList: {
+      data: 'Projetos da página.',
+      has_more: 'Indica se existem mais páginas.',
+      next_cursor: 'Cursor da próxima página, ou `null` na última.',
+    },
+    PartnerProjectDetail: {
+      id: { description: 'Identificador do projeto.', example: ID('proj') },
+      name: { description: 'Nome de exibição do projeto.', example: 'Loja do Zé' },
+      external_ref: { description: 'Seu identificador do cliente.', example: 'lead_123' },
+      environment: { description: 'Ambiente do projeto.', example: 'live' },
+      created_at: { description: 'Quando o projeto foi criado.', example: TS },
+      channels: 'Canais do projeto, em qualquer estado. Um canal `active` indica que o cliente concluiu a conexão.',
+      'channels.[].id': { description: 'Identificador do canal.', example: ID('chan') },
+      'channels.[].status': { description: 'Estado do canal: `pending`, `active`, `degraded` ou `disabled`.', example: 'active' },
+    },
+    PartnerProjectDeleting: {
+      project_id: { description: 'Projeto que está sendo apagado.', example: ID('proj') },
+      status: { description: 'Sempre `deleting`. O projeto continua lá, parcialmente apagado. Repita a chamada até receber `204`.', example: 'deleting' },
+    },
+    PartnerChannelList: {
+      data: 'Canais da página.',
+      has_more: 'Indica se existem mais páginas.',
+      next_cursor: 'Cursor da próxima página, ou `null` na última.',
+      'data.[].id': { description: 'Identificador do canal.', example: ID('chan') },
+      'data.[].project_id': { description: 'Projeto dono do canal.', example: ID('proj') },
+      'data.[].external_ref': { description: 'O `external_ref` do projeto.', example: 'lead_123' },
+      'data.[].address': { description: 'Endereço do canal, em E.164.', example: '+5581988888888' },
+      'data.[].status': { description: 'Estado do canal: `pending`, `active`, `degraded` ou `disabled`.', example: 'active' },
+      'data.[].status_reason_code': { description: 'Por que o canal está `degraded` ou `disabled`: `provider_auth_repeated_failure` (`degraded`), `disconnected_by_customer` ou `offboarded` (`disabled`). `null` nos demais casos.', example: null },
+      'data.[].connection_mode': { description: 'Como o número foi conectado: `cloud_api` ou `coexistence` (o número continua no app do WhatsApp Business).', example: 'cloud_api' },
+      'data.[].disconnection_reason': { description: 'O motivo que o provedor deu para a desconexão: `account_disconnected`, `business_downgrade`, `change_number`, `companion_inactivity`, `primary_inactivity`, `user_re_registered` ou `unknown`. `null` quando não houve desconexão.', example: null },
+      'data.[].created_at': { description: 'Quando o canal foi criado.', example: TS },
+    },
+    PartnerProjectApiKey: {
+      id: { description: 'Identificador da chave.', example: ID('key') },
+      project_id: { description: 'Projeto ao qual a chave pertence.', example: ID('proj') },
+      name: { description: 'Nome que você deu à chave, ou `null`.', example: 'Loja do Zé' },
+      key_prefix: { description: 'Primeiros caracteres da chave, seguros para exibir.', example: 'rt_live_abc' },
+      last_four: { description: 'Últimos quatro caracteres da chave.', example: 'k3xQ' },
+      scopes: 'Escopos concedidos à chave do projeto.',
+      expires_at: 'Quando a chave expira, ou `null` se ela não expira.',
+      ip_allowlist: 'Endereços IP ou blocos CIDR permitidos. Uma lista vazia não restringe.',
+      created_at: { description: 'Quando a chave foi criada.', example: TS },
+      revoked_at: 'Quando a chave foi revogada, ou `null` enquanto está ativa.',
+      last_used_at: 'Último uso da chave, arredondado para o minuto, ou `null`.',
+    },
+    PartnerProjectApiKeyWithSecret: {
+      id: { description: 'Identificador da chave.', example: ID('key') },
+      project_id: { description: 'Projeto ao qual a chave pertence.', example: ID('proj') },
+      name: { description: 'Nome que você deu à chave, ou `null`.', example: 'Loja do Zé' },
+      key_prefix: { description: 'Primeiros caracteres da chave, seguros para exibir.', example: 'rt_live_abc' },
+      last_four: { description: 'Últimos quatro caracteres da chave.', example: 'k3xQ' },
+      scopes: 'Escopos concedidos à chave do projeto.',
+      expires_at: 'Quando a chave expira, ou `null` se ela não expira.',
+      ip_allowlist: 'Endereços IP ou blocos CIDR permitidos. Uma lista vazia não restringe.',
+      created_at: { description: 'Quando a chave foi criada.', example: TS },
+      revoked_at: 'Quando a chave foi revogada, ou `null` enquanto está ativa.',
+      last_used_at: 'Último uso da chave, arredondado para o minuto, ou `null`.',
+      secret: { description: 'A chave de API completa. Exibida **apenas agora**. Guarde-a com segurança.', example: 'rt_live_...' },
     },
   },
 }

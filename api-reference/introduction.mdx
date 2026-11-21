@@ -3,7 +3,7 @@ title: "Referência da API"
 description: "URL base, autenticação, formato de resposta, paginação, idempotência, limites e convenções da API REST da Routa."
 ---
 
-A API da Routa é REST sobre HTTPS, com requisições e respostas em JSON e autenticação por chave de API no formato `Bearer`. Esta página reúne as regras comuns a todos os endpoints. Cada endpoint tem a sua própria página, com parâmetros, exemplos e um *playground* para testar chamadas.
+A API da Routa é REST sobre HTTPS, com requisições e respostas em JSON e autenticação por chave no formato `Bearer`. Esta página reúne as regras comuns a todos os endpoints. Cada endpoint tem a sua própria página, com parâmetros, exemplos e um *playground* para testar chamadas.
 
 A especificação OpenAPI completa está em [`openapi.json`](/openapi.json).
 
@@ -30,6 +30,8 @@ curl https://api.routa.chat/v1/whoami \
 
 Cada chave pertence a um projeto e carrega escopos. Uma rota que exige um escopo ausente na chave responde `403 insufficient_scope`. Veja [Chaves de API](/authentication).
 
+As rotas `/v1/partner/*` usam outra credencial: a **chave de parceiro** (`rt_partner_...`), que pertence à organização e serve para provisionar os projetos dos seus clientes. As duas chaves não se misturam. A chave de parceiro nunca envia mensagens, e uma chave de projeto recebe `401 partner_key_invalid` nas rotas de parceiro. Veja [API de parceiro](/partners/overview).
+
 ## O que a chave de API alcança
 
 | Grupo | Rotas principais | Página |
@@ -42,8 +44,16 @@ Cada chave pertence a um projeto e carrega escopos. Uma rota que exige um escopo
 | Uso | `GET /v1/usage` | [Uso](/api-reference/endpoint/usage/retrieve) |
 | Identidade | `GET /v1/whoami` | [Identidade](/api-reference/endpoint/identity/whoami) |
 
+As rotas de parceiro usam a chave de parceiro, e não a chave de projeto:
+
+| Grupo | Rotas principais | Página |
+| --- | --- | --- |
+| Projetos | `/v1/partner/projects` e sub-rotas (chaves de API do projeto) | [Parceiros](/api-reference/endpoint/partner/create-project) |
+| Canais | `GET /v1/partner/channels`, `DELETE /v1/partner/projects/{projectId}/channels/{channelId}` | [Canais](/api-reference/endpoint/partner/list-channels) |
+| Webhook da organização | `GET`/`PUT /v1/partner/webhook` e `POST /v1/partner/webhook/rotate_secret` | [Webhook](/api-reference/endpoint/partner/set-webhook) |
+
 <Info>
-  Organizações, projetos, chaves de API, canais, membros e cobrança são gerenciados no **painel**, com sessão de usuário. Essas rotas não aceitam chave de API e não fazem parte desta referência.
+  Organizações, membros, chaves de parceiro, canais de um projeto e cobrança são gerenciados no **painel**, com sessão de usuário. Essas rotas não aceitam chave de API e não fazem parte desta referência.
 </Info>
 
 ## Formato de resposta
@@ -111,6 +121,8 @@ curl "https://api.routa.chat/v1/messages?limit=50" \
 
 `GET /v1/events` usa `after` (o id do último evento) no lugar de `cursor`. Veja [Paginação](/reliability/pagination).
 
+As listagens de parceiro (`GET /v1/partner/projects` e `GET /v1/partner/channels`) aceitam `limit` de 1 a 200, com padrão 50.
+
 ## Idempotência
 
 `POST /v1/messages` aceita o header `Idempotency-Key`. Repetir a requisição com a mesma chave e o mesmo corpo devolve a resposta original, com `Idempotent-Replay: true`, sem criar outra mensagem.
@@ -126,7 +138,7 @@ As chaves são mantidas por 24 horas. Veja [Idempotência](/reliability/idempote
 
 ## Limites de taxa
 
-Os limites são por projeto, por classe de endpoint.
+Os limites das rotas de projeto são por projeto, por classe de endpoint.
 
 | Classe | Taxa sustentada | Rajada |
 | --- | --- | --- |
@@ -144,6 +156,8 @@ RateLimit-Reset: 1
 Retry-After: 1
 ```
 
+As rotas `/v1/partner/*` têm um limite próprio, **por organização**: 10 req/s sustentados, com rajada de 30, em um único balde para todas essas rotas. Um `429` traz os mesmos headers.
+
 Veja [Limites de taxa](/reliability/rate-limits).
 
 ## Status HTTP
@@ -152,8 +166,9 @@ Veja [Limites de taxa](/reliability/rate-limits).
 | --- | --- |
 | `200` | Sucesso. |
 | `201` | Recurso criado. |
-| `202` | `POST /v1/messages`: aceito, o envio é assíncrono. |
-| `401` | Chave de API ausente ou inválida. |
+| `202` | `POST /v1/messages`: aceito, o envio é assíncrono. Em `DELETE /v1/partner/projects/{projectId}`, a exclusão está parcial: repita a chamada. |
+| `204` | Sem conteúdo. A operação foi concluída. |
+| `401` | Chave de API ausente ou inválida. Nas rotas de parceiro, chave de parceiro ausente ou inválida. |
 | `402` | Franquia ou limite do plano esgotado. |
 | `403` | A chave não tem o escopo necessário. |
 | `404` | Recurso inexistente ou de outro projeto. |
@@ -176,6 +191,9 @@ Os identificadores são strings opacas com um prefixo que indica o tipo.
 | --- | --- |
 | `msg_` | Mensagem |
 | `chan_` | Canal |
+| `proj_` | Projeto |
+| `key_` | Chave de API de um projeto |
+| `ptn_` | Perfil de parceiro |
 | `evt_` | Evento |
 | `tmpl_` | Template |
 | `med_` | Mídia |

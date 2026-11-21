@@ -6,8 +6,9 @@
 //
 // `source` is a URL or a file path. It defaults to http://localhost:3000/docs/json,
 // the document `apps/api` serves outside production. The script keeps only the
-// public (API key) routes, normalizes the Elysia output into plain OpenAPI 3.0,
-// and applies the Portuguese copy from ./openapi-copy.mjs.
+// public routes (project API key, plus `/v1/partner/*`, which a partner key
+// authenticates), normalizes the Elysia output into plain OpenAPI 3.0, and
+// applies the Portuguese copy from ./openapi-copy.mjs.
 
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
@@ -18,7 +19,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const source = process.argv[2] ?? 'http://localhost:3000/docs/json'
 
 const PUBLIC_PATH =
-  /^\/v1\/(messages|whoami|events|webhook_endpoints|templates|media|usage)(\/|$)/
+  /^\/v1\/(messages|whoami|events|webhook_endpoints|templates|media|usage|partner)(\/|$)/
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete']
 
 const load = async () => {
@@ -86,6 +87,7 @@ const normalize = (node) => {
   const out = {}
   for (const [key, value] of Object.entries(node)) {
     if (key === 'format' && value === 'numeric') continue
+    if (key === 'additionalProperties' && value === false) continue
     out[key] = normalize(value)
   }
   return out
@@ -109,10 +111,22 @@ const main = async () => {
       if (!copy) throw new Error(`Missing copy for ${key}. Add it to scripts/openapi-copy.mjs`)
 
       const parameters = [
-        ...(op.parameters ?? []).map((p) => ({
-          ...normalize(p),
-          description: copy.params?.[p.name] ?? COPY.params[p.name] ?? p.description,
-        })),
+        ...(op.parameters ?? []).map((p) => {
+          const param = {
+            ...normalize(p),
+            description: copy.params?.[p.name] ?? COPY.params[p.name] ?? p.description,
+          }
+          // Partner lists page by 50 up to 200, not by 20 up to 100.
+          if (p.name === 'limit' && copy.limit) {
+            param.schema = {
+              type: 'integer',
+              minimum: 1,
+              maximum: copy.limit.maximum,
+              default: copy.limit.default,
+            }
+          }
+          return param
+        }),
         ...(copy.headers ?? []),
       ]
 
@@ -136,7 +150,7 @@ const main = async () => {
       for (const [status, response] of Object.entries(op.responses)) {
         const content = jsonOnly(response.content)
         responses[status] = {
-          description: COPY.statuses[status] ?? 'Resposta',
+          description: copy.statuses?.[status] ?? COPY.statuses[status] ?? 'Resposta',
           ...(content ? { content: normalize(content) } : {}),
         }
       }
@@ -150,7 +164,9 @@ const main = async () => {
         ...(parameters.length ? { parameters } : {}),
         ...(requestBody ? { requestBody } : {}),
         responses,
-        security: [{ bearerAuth: copy.scope ? [copy.scope] : [] }],
+        security: [
+          { [copy.auth === 'partner' ? 'partnerAuth' : 'bearerAuth']: copy.scope ? [copy.scope] : [] },
+        ],
         ...(copy.scope ? { 'x-required-scope': copy.scope } : {}),
       }
     }
@@ -177,6 +193,13 @@ const main = async () => {
     TemplateMedia: pick('post', '/v1/templates/media', '201'),
     Usage: pick('get', '/v1/usage', '200'),
     Whoami: pick('get', '/v1/whoami', '200'),
+    PartnerProject: pick('post', '/v1/partner/projects', '201'),
+    PartnerProjectList: pick('get', '/v1/partner/projects', '200'),
+    PartnerProjectDetail: pick('get', '/v1/partner/projects/{projectId}', '200'),
+    PartnerProjectDeleting: pick('delete', '/v1/partner/projects/{projectId}', '202'),
+    PartnerChannelList: pick('get', '/v1/partner/channels', '200'),
+    PartnerProjectApiKey: pick('post', '/v1/partner/projects/{projectId}/api_keys/{id}/revoke', '200'),
+    PartnerProjectApiKeyWithSecret: pick('post', '/v1/partner/projects/{projectId}/api_keys', '201'),
   }
   for (const [name, schema] of Object.entries(registry)) {
     if (!schema) throw new Error(`Could not locate the source schema for ${name}`)
@@ -225,6 +248,12 @@ const main = async () => {
           scheme: 'bearer',
           description:
             'Chave de API do projeto, no formato `rt_live_...` ou `rt_test_...`, enviada como `Authorization: Bearer <chave>`.',
+        },
+        partnerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          description:
+            'Chave de parceiro, no formato `rt_partner_...`, enviada como `Authorization: Bearer <chave>`. Vale apenas para as rotas `/v1/partner/*`. Uma chave de projeto não funciona nelas, e uma chave de parceiro não funciona nas demais rotas.',
         },
       },
       schemas,
