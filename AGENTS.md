@@ -25,10 +25,13 @@ Use the same Portuguese term everywhere.
 | endpoint de webhook | webhook (when you mean the registered resource) |
 | aceita (`accepted`) | enviada, when the message has not reached the provider |
 | painel | dashboard, console |
+| chave de parceiro | partner token, chave de API (when you mean `rt_partner_…`) |
+| link assinado | magic link, link de convite |
+| cliente (do parceiro) | tenant, usuário final |
 
 - Keep API identifiers, field names, error codes and event types in English and in code formatting: `message.delivered`, `channel_inactive`, `Idempotency-Key`.
 - Write `WhatsApp`, `Routa`, `MultiON`, `Meta` as shown.
-- Never expose the provider as a public concept. Say "provedor", not the provider's product name, except in the supported-media table where WhatsApp limits apply.
+- Routa is omnichannel, so the provider is a public concept: the `provider` field in `GET /v1/usage` and its values (for example `whatsapp_cloud`) are part of the contract and may appear in docs. In prose, prefer "provedor" unless the channel type matters. Never document provider-specific payloads or error codes.
 
 ## Style preferences
 
@@ -45,13 +48,15 @@ Use the same Portuguese term everywhere.
 
 Document:
 
-- The public data-plane API authenticated by API key: messages, events, webhook endpoints, templates, media, usage and `whoami`.
+- The public data-plane API authenticated by project API key: messages, events, webhook endpoints, templates, media, usage and `whoami`.
+- The Partner API authenticated by partner key (`rt_partner_…`, `/v1/partner/*`), the signed onboarding link and the organization webhook. Say the access is "concedido pela Routa"; never name the plan that grants it. The Node.js SDK's partner client is experimental: say so.
 - Behavior a customer can observe: statuses, events, errors, headers, limits and retention that are part of the published contract.
 - The official Node.js SDK and its known gaps.
 
 Do not document:
 
-- Control-plane routes authenticated by session cookie (organizations, sessions, projects, API key management, channels, members, invitations, billing checkout), except as "done in the dashboard".
+- Control-plane routes authenticated by session cookie (organizations, sessions, projects, API key management, channels, members, invitations, billing checkout), except as "done in the dashboard". This includes partner profile, partner key, signing secret and redirect origin management, and template edit, delete and sync.
+- The public `/v1/connect/*` routes: they belong to Routa's own connect page, not to the partner's integration.
 - Provider webhook receivers (`/providers/...`), internal queues, workers, database schema, dispatch states and other internals.
 - Provider-specific payloads or error codes.
 - Prices and plan limits that are marked provisional in the product. Link to the website instead.

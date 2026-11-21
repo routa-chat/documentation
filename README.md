@@ -6,11 +6,11 @@ Official documentation for [Routa](https://routa.chat), the messaging infrastruc
 
 | Tab | Content |
 | --- | --- |
-| **Documentação** | Quickstart, API keys and scopes, environments, concepts (data model, messages, events, templates, media), guides, webhooks, reliability (idempotency, rate limits, pagination, delivery guarantees), errors and billing. |
+| **Documentação** | Quickstart, API keys and scopes, environments, concepts (data model, messages, events, templates, media), guides, webhooks, reliability (idempotency, rate limits, pagination, delivery guarantees), errors, billing and partners (onboarding, signed link, partner keys, organization webhook). |
 | **Referência da API** | Introduction (base URL, formats, limits, conventions) and one page per public endpoint, generated from `openapi.json`. |
 | **SDK Node.js** | Installation, configuration, resources, webhooks, pagination, error handling and types for `@routa-chat/sdk`. |
 
-Only the public, API-key-authenticated surface (`/v1/messages`, `/v1/events`, `/v1/webhook_endpoints`, `/v1/templates`, `/v1/media`, `/v1/usage`, `/v1/whoami`) is documented. Dashboard routes (sessions, projects, API keys, channels, members, billing) are intentionally left out.
+Only the public, API-key-authenticated surface is documented: the project-key routes (`/v1/messages`, `/v1/events`, `/v1/webhook_endpoints`, `/v1/templates`, `/v1/media`, `/v1/usage`, `/v1/whoami`) and the Partner API, which a partner key (`rt_partner_…`) authenticates (`/v1/partner/*`). Dashboard routes (sessions, projects, API keys, channels, members, billing, partner profile and partner key management) are intentionally left out.
 
 ## Repository layout
 
