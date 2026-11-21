@@ -51,8 +51,8 @@ Use um template para enviar uma mensagem aprovada pelo WhatsApp, com valores var
       -H "Authorization: Bearer $ROUTA_API_KEY"
     ```
 
-    - Se o template for **rejeitado** (`rejected`), `rejection_reason` indica o motivo. Corrija e submeta de novo com outro nome.
-    - Se a **submissão falhar** (`failed`), a Routa não conseguiu enviar o template ao provedor. `failure_code` indica o motivo. Você não consegue reenviar: crie o template de novo. Veja [Quando a submissão falha](/concepts/templates#quando-a-submissão-falha).
+    - Se o template for **rejeitado** (`rejected`), `rejection_reason` indica o motivo. Corrija e submeta de novo com outro nome, ou edite o template no painel.
+    - Se a **submissão falhar** (`failed`), a Routa não conseguiu enviar o template ao provedor. `failure_code` indica o motivo, e `failure_detail` traz a frase do provedor, quando houver. Pela API, você não reenvia: crie o template de novo. No painel, é possível editar e reenviar. Veja [Quando a submissão falha](/concepts/templates#quando-a-submissão-falha).
   </Step>
   <Step title="Envie com parâmetros">
     Com o template `approved`, passe `template.id` e os `body_parameters` na ordem dos placeholders.
@@ -93,9 +93,11 @@ A Routa valida o template no aceite, então estes erros voltam na hora:
 | `template_not_found` | O template não existe neste projeto (`404`). |
 | `template_not_approved` | O template ainda não foi aprovado, ou foi rejeitado ou desativado (`422`). |
 | `template_paused` | O provedor pausou o template (`422`). |
-| `template_not_sendable` | O template foi importado do WhatsApp e é somente leitura (`422`). Crie um equivalente pela API ou use outro. |
+| `template_not_sendable` | O template é somente leitura (importado do WhatsApp) ou está sendo excluído (`422`). Use outro template. |
 | `content_rejected` | A quantidade de `body_parameters` não bate com as variáveis do template (`422`). |
 
+Ao **submeter**, a Routa também recusa na hora um nome, um corpo ou botões que o WhatsApp rejeitaria (`template_name_invalid`, `template_variables_invalid`, `template_components_invalid`, com `error.param`). Veja [Regras de validação no aceite](/concepts/templates#regras-de-validação-no-aceite).
+
 <Info>
-  O SDK expõe `templates.submit()` apenas com corpo de texto. Para cabeçalho, rodapé e botões, use a API REST diretamente. Veja [Templates](/concepts/templates#componentes-ricos).
+  `templates.submit()` aceita `components` (cabeçalho, rodapé e botões) a partir da versão 0.3.0 do SDK, e `templates.uploadMedia()` envia o arquivo de um cabeçalho de mídia. Veja [Templates no SDK](/sdk/templates) e [Componentes ricos](/concepts/templates#componentes-ricos).
 </Info>

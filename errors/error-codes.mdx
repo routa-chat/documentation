@@ -9,7 +9,7 @@ Este catálogo lista os códigos que as rotas da API pública (autenticadas por 
 
 | Código | Status | Causa e solução |
 | --- | --- | --- |
-| `api_key_invalid` | `401` | Chave ausente, malformada, revogada ou expirada, ou requisição vinda de um IP fora da lista permitida. Veja [Chaves de API](/authentication). |
+| `api_key_invalid` | `401` | Chave ausente, malformada, revogada ou expirada, ou requisição vinda de um IP fora da lista permitida. Uma chave de parceiro (`rt_partner_…`) também recebe este erro nas rotas de dados. Veja [Chaves de API](/authentication). |
 | `insufficient_scope` | `403` | A chave não tem o escopo exigido pela rota. Crie uma chave com o escopo necessário. |
 
 ## Cobrança
@@ -18,8 +18,8 @@ Este catálogo lista os códigos que as rotas da API pública (autenticadas por 
 | --- | --- | --- |
 | `message_quota_exceeded` | `402` | A franquia de mensagens do período acabou. `details` traz `limit`, `used` e `resets_at`. Aguarde a renovação, ative o excedente ou troque de plano. Veja [Planos e franquia](/billing/plans-and-quota). |
 | `free_messages_exhausted` | `402` | A organização nunca assinou um plano e já usou as 10 mensagens grátis, que valem uma única vez. `details` traz `limit` e `used`, sem `resets_at`, porque essa franquia não renova. Escolha um plano no painel. Projetos de teste não são afetados. Veja [Planos e franquia](/billing/plans-and-quota#mensagens-grátis). |
-| `subscription_required` | `402` | A organização teve uma assinatura que não está mais em situação regular, por exemplo cancelada ou não paga, e não pode enviar de projetos de produção. Contrate um plano no painel. Quem nunca assinou recebe `free_messages_exhausted` depois das mensagens grátis. |
-| `payment_failed` | `402` | O pagamento da assinatura falhou e o período de tolerância acabou. Atualize a forma de pagamento no painel. |
+| `subscription_required` | `402` | A assinatura não está em situação regular (cancelada, não paga, ou cancelada para o fim do período que já acabou), e a organização não pode enviar de projetos de produção. Contrate um plano no painel. Também aparece por instantes quando o período de cobrança de uma assinatura nova ainda não foi aberto: tente de novo. Quem nunca assinou recebe `free_messages_exhausted` depois das mensagens grátis. |
+| `payment_failed` | `402` | O pagamento da assinatura falhou e o período de tolerância acabou, ou uma assinatura paga com Pix passou do fim do período sem renovar e a tolerância acabou. Atualize a forma de pagamento no painel. |
 
 <Warning>
   Não retente um `402` esperando que passe sozinho. Esperar não aumenta a franquia. Resolva a causa no plano e então reenvie.
@@ -61,7 +61,7 @@ Um recurso de outro projeto também retorna `404`, para não revelar que ele exi
 
 | Código | Causa e solução |
 | --- | --- |
-| `channel_inactive` | O canal não está `active`. Verifique o status no painel. |
+| `channel_inactive` | O canal não está `active`: ele está `pending`, `degraded` ou `disabled`. Um canal `disabled` foi desativado pela sua equipe, desconectado pelo cliente no app do WhatsApp Business ou removido pelo provedor. Verifique o status no painel. Veja [Canais](/concepts/data-model#canais). |
 | `capability_unsupported` | O canal não suporta esse tipo de conteúdo. |
 | `invalid_recipient` | O formato do número é válido, mas ele não pode existir no país indicado. |
 | `content_rejected` | Conteúdo inválido: informe exatamente um entre `text` e `template`, e a quantidade certa de `body_parameters`. |
@@ -74,10 +74,23 @@ Um recurso de outro projeto também retorna `404`, para não revelar que ele exi
 | --- | --- |
 | `template_not_approved` | O template ainda não foi aprovado, ou foi rejeitado ou desativado. |
 | `template_paused` | O provedor pausou o template. |
-| `template_not_sendable` | O template foi importado do WhatsApp e é somente leitura (`read_only: true`): ele usa algo que a Routa ainda não consegue enviar. Crie um template equivalente pela API ou use outro. Veja [Templates importados](/concepts/templates#templates-importados). |
-| `template_variables_invalid` | As variáveis `{{n}}` do corpo são inválidas (por exemplo, fora de sequência). |
-| `template_components_invalid` | Cabeçalho, rodapé ou botões violam as regras de componentes. Veja [Templates](/concepts/templates#componentes-ricos). |
+| `template_not_sendable` | O template é somente leitura (`read_only: true`), porque foi importado do WhatsApp e usa algo que a Routa não consegue enviar, ou está sendo excluído (`deletion_requested: true`). Use outro template. Veja [Templates importados](/concepts/templates#templates-importados). |
+| `template_name_invalid` | O nome só pode ter letras minúsculas, dígitos e `_`, com até 512 caracteres. `param` é `name`. |
+| `template_variables_invalid` | As variáveis `{{n}}` do corpo são inválidas: por exemplo, fora de sequência, ou no início ou no fim do corpo. |
+| `template_components_invalid` | O corpo, o cabeçalho, o rodapé ou os botões violam as regras de componentes. `param` indica a parte. Veja [Regras de validação](/concepts/templates#regras-de-validação-no-aceite). |
 | `template_media_invalid` | O arquivo do cabeçalho está ausente, sem `Content-Type` ou tem tipo ou tamanho inválido. |
+
+Os erros de template trazem `error.param`, o campo da requisição a corrigir:
+
+| `param` | Origem |
+| --- | --- |
+| `name` | `template_name_invalid`. |
+| `body_text` | `template_components_invalid` por causa do corpo. |
+| `components.header` | `template_components_invalid` por causa do cabeçalho. |
+| `components.footer` | `template_components_invalid` por causa do rodapé. |
+| `components.buttons` | `template_components_invalid` por causa de um botão ou da combinação de botões. |
+
+`param` aponta o componente, e não o item dentro dele: com `components.buttons`, leia `message` para saber qual botão.
 
 ### Mídia
 
@@ -103,6 +116,27 @@ Um recurso de outro projeto também retorna `404`, para não revelar que ele exi
 | Código | Causa e solução |
 | --- | --- |
 | `usage_range_invalid` | O intervalo `from`/`to` é inválido. Use datas `YYYY-MM-DD`, com `from` anterior a `to`. |
+
+## API de parceiros
+
+Estes códigos vêm das rotas `/v1/partner/*`, que usam a [chave de parceiro](/partners/partner-keys). Os códigos de escopo, de limite de taxa e os de recurso não encontrado (`insufficient_scope`, `rate_limit_exceeded`, `channel_not_found`, `webhook_endpoint_not_found`) são os mesmos descritos acima.
+
+| Código | Status | Causa e solução |
+| --- | --- | --- |
+| `partner_key_invalid` | `401` | A chave não é uma chave de parceiro ativa: ela não existe, foi revogada, expirou, vem de um IP fora da lista permitida ou é uma chave de projeto. A resposta é sempre a mesma. |
+| `partner_api_not_available` | `404` | O plano da organização não inclui a API de parceiros. |
+| `project_not_found` | `404` | O projeto não existe, ou não foi criado pela API de parceiros. Projetos criados no painel não são acessíveis por esta API. |
+| `api_key_not_found` | `404` | A chave de API do projeto não existe. |
+| `project_limit_exceeded` | `402` | O plano atingiu o máximo de projetos. `details.limit` traz o máximo. Apague um projeto abandonado para liberar a vaga. |
+| `invalid_project_name` | `422` | O nome do projeto está vazio, passa de 200 caracteres ou tem um caractere de controle. |
+| `invalid_external_ref` | `422` | O `external_ref` precisa ter de 1 a 128 caracteres entre `A-Z a-z 0-9 . _ : -`. |
+| `external_ref_immutable` | `422` | O `external_ref` de um projeto não muda depois de definido. |
+| `invalid_api_key_name` | `422` | O nome da chave passa de 80 caracteres. |
+| `invalid_cursor` | `422` | O `cursor` não é válido. Use o `next_cursor` devolvido pela API. |
+| `invalid_webhook_url` | `422` | A URL do webhook da organização não é HTTPS ou não resolve para um endereço público. |
+| `invalid_subscribed_types` | `422` | `subscribed_types` precisa ser uma lista não vazia de tipos válidos ou curingas como `message.*`. |
+| `project_not_deletable` | `409` | O projeto não pode ser apagado. `details.reason` é `has_enabled_channel` (desative o canal no painel antes) ou `last_project` (é o último projeto da organização). |
+| `channel_not_disabled` | `409` | Só um canal `disabled` pode ser apagado. |
 
 ## Perímetro HTTP
 

@@ -3,7 +3,7 @@ title: "Mensagens e ciclo de vida"
 description: "O objeto mensagem, os tipos de conteúdo e como o status evolui de accepted até read ou failed."
 ---
 
-Uma mensagem representa uma comunicação em qualquer direção: `outbound` (enviada por você) ou `inbound` (recebida de um cliente). Ela é independente do provedor: o mesmo objeto serve para qualquer canal presente ou futuro.
+Uma mensagem representa uma comunicação em qualquer direção: `outbound` (enviada a partir do número do canal, pela API ou, em canais em modo de coexistência, pelo app do WhatsApp Business) ou `inbound` (recebida de um cliente). Ela é independente do provedor: o mesmo objeto serve para qualquer canal presente ou futuro.
 
 ## O objeto mensagem
 
@@ -12,6 +12,7 @@ Uma mensagem representa uma comunicação em qualquer direção: `outbound` (env
   "id": "msg_01J8ZK9M3Q7X...",
   "channel": "chan_01J8...",
   "direction": "outbound",
+  "origin": "api",
   "from": "+5581988888888",
   "to": "+5581999999999",
   "content": { "type": "text", "body": "Olá! Seu pedido foi confirmado." },
@@ -32,11 +33,12 @@ Uma mensagem representa uma comunicação em qualquer direção: `outbound` (env
 | `id` | Identificador da mensagem (`msg_...`). |
 | `channel` | Canal usado (`chan_...`). |
 | `direction` | `outbound` ou `inbound`. |
-| `from`, `to` | Endereços no formato E.164. |
+| `origin` | De onde veio uma mensagem `outbound`: `api` (enviada pela Routa) ou `business_app` (a empresa enviou pelo app do WhatsApp Business). É `null` em mensagens `inbound`. Sempre presente. Veja [Mensagens enviadas pelo app do WhatsApp Business](#mensagens-enviadas-pelo-app-do-whatsapp-business). |
+| `from`, `to` | Endereços no formato E.164. Em uma mensagem com `origin: "business_app"`, `to` pode ser um identificador do provedor, e não um número. |
 | `content` | Conteúdo, um objeto com `type`. Veja a tabela de tipos de conteúdo abaixo. É `null` depois que a retenção remove o conteúdo. |
 | `content_redacted_at` | Quando a retenção removeu o conteúdo, ou `null` enquanto a mensagem ainda o tem. |
 | `status` | Estado atual no ciclo de vida. |
-| `failure_code` | Motivo da falha, de um conjunto fechado de códigos da Routa. É `null` até a mensagem falhar. |
+| `failure_code` | Motivo da falha. É `null` até a mensagem falhar. Veja [Motivos de falha](#motivos-de-falha). |
 | `metadata` | Até 20 pares chave-valor de texto, de propriedade do cliente. Total de até 1 KB. |
 | `accepted_at` | Quando a Routa aceitou a mensagem. Sempre presente. |
 | `sent_at`, `delivered_at`, `read_at`, `failed_at` | Momento de cada transição, ou `null` se ela não ocorreu. |
@@ -81,6 +83,29 @@ Provedores entregam atualizações de status fora de ordem e mais de uma vez. A 
 
 Se o provedor falha de forma transitória, a Routa tenta de novo sozinha, com espera crescente. Enquanto isso a mensagem permanece `accepted`. Não existe status `queued` nem `retrying` na API pública. Se as tentativas se esgotam, a mensagem vira `failed`. O motivo aparece na linha do tempo da mensagem no painel.
 
+### Motivos de falha
+
+`failure_code` explica por que a mensagem virou `failed`. Nunca é um código do provedor.
+
+| Valor | Significado |
+| --- | --- |
+| `invalid_recipient` | O destinatário não é um número que o WhatsApp consegue alcançar. |
+| `session_expired` | A janela de 24 horas de atendimento terminou. Fora dela, só um [template](/concepts/templates) aprovado pode iniciar a conversa. |
+| `content_rejected` | O provedor recusou o conteúdo ou os parâmetros da mensagem. |
+| `unsupported_by_app` | O número do canal também está no app do WhatsApp Business e o provedor não conseguiu entregar a mensagem. Pode ocorrer na primeira mensagem ou com um aparelho vinculado que ele não suporta. Não há retentativa: abra o app e confirme a conversa. |
+| `provider_auth_failed` | O provedor recusou a credencial do canal ou restringiu a conta. Verifique o canal no painel. |
+| `provider_unavailable` | O provedor ficou indisponível. |
+| `provider_rate_limited` | O provedor limitou o envio. |
+| `provider_internal` | O provedor respondeu com um erro que ele próprio não detalha. |
+| `provider_reported_failure` | O provedor informou a falha sem um motivo que a Routa reconheça. |
+| `dispatch_exhausted` | As tentativas de envio se esgotaram. |
+| `channel_inactive`, `channel_not_found`, `capability_unsupported` | O canal deixou de estar apto a enviar entre o aceite e o envio. Veja [Códigos de erro](/errors/error-codes). |
+| `template_not_found`, `template_not_approved`, `template_paused` | O template deixou de estar aprovado entre o aceite e o envio. |
+
+<Note>
+  O conjunto pode crescer. Trate um valor desconhecido como uma falha genérica e use `failure_code` apenas para decidir o que mostrar ou registrar.
+</Note>
+
 ## Mensagens recebidas
 
 Uma mensagem inbound nasce com `direction: "inbound"` e `status: "delivered"`, e gera o evento `message.received`. Para sinalizar ao remetente que você leu, use `POST /v1/messages/{id}/read`, que leva a mensagem para `read`.
@@ -88,6 +113,26 @@ Uma mensagem inbound nasce com `direction: "inbound"` e `status: "delivered"`, e
 Um tipo de conteúdo que a Routa ainda não sabe modelar, como `interactive` ou `contacts`, chega como `{ "type": "unsupported" }`: a mensagem existe e gera `message.received`.
 
 Duas coisas recebidas são **ignoradas de propósito**: reações e avisos de sistema, como a troca de número de um contato. Elas não criam mensagem, não geram `message.received` e não contam como uso.
+
+## Mensagens enviadas pelo app do WhatsApp Business
+
+Em um canal conectado **em modo de coexistência**, o número continua no app do WhatsApp Business. O que a empresa envia pelo app, ou por um aparelho vinculado, também aparece na API.
+
+- A mensagem é `outbound`, com `origin: "business_app"`. A Routa não a enviou: ela só a registra.
+- Ela nasce `sent`, sem passar por `accepted`. O evento é só `message.sent`, sem `message.accepted`. `accepted_at` e `sent_at` marcam o instante em que a empresa enviou.
+- As mudanças de status seguintes (`message.delivered`, `message.read` e `message.failed`) chegam normalmente.
+- Ela **não consome franquia** e não entra em [`GET /v1/usage`](/billing/usage).
+- `to` é o número no formato E.164. Quando o provedor só informa um identificador da pessoa, `to` traz esse identificador, e não um número. O mesmo cliente, por número e por identificador, aparece como duas conversas.
+- Se a empresa edita o texto ou a legenda no app, `content` é atualizado. Se ela apaga a mensagem, `content` vira `null` e `content_redacted_at` registra o momento. Nenhum dos dois gera evento.
+
+### Histórico importado
+
+Quando o canal é conectado, a Routa importa **em silêncio** as conversas que a empresa já tinha no app. Essas mensagens aparecem em `GET /v1/messages` e `GET /v1/messages/{id}`, mas:
+
+- Não geram evento nem webhook, não consomem franquia e não entram no uso.
+- `accepted_at` é o momento original da mensagem, então a ordem segue o tempo real. As enviadas pela empresa têm `origin: "business_app"`, e as recebidas, `origin: null`.
+- O conteúdo mais antigo que a [retenção](/reliability/delivery-guarantees#retenção-do-conteúdo-de-mensagens) do plano já chega com `content: null` e `content_redacted_at`.
+- Só texto e localização trazem conteúdo. Imagens, áudios, vídeos e documentos chegam como `{ "type": "unsupported" }`.
 
 ## Tipos de conteúdo
 

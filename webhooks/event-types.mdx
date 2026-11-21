@@ -14,7 +14,7 @@ Para assinar um grupo inteiro, use um curinga no `subscribed_types` do endpoint:
 | Tipo | Disparado quando |
 | --- | --- |
 | `message.accepted` | A Routa aceitou uma mensagem enviada por você. Você já sabe disso pelo `202`, mas pode assinar o evento. |
-| `message.sent` | O provedor aceitou a mensagem. |
+| `message.sent` | O provedor aceitou a mensagem. Também é o único evento de uma mensagem que a empresa enviou pelo app do WhatsApp Business (`data.origin` é `business_app`). |
 | `message.delivered` | A entrega ao aparelho do destinatário foi confirmada. |
 | `message.read` | O destinatário leu a mensagem. |
 | `message.failed` | A mensagem falhou de forma terminal. |
@@ -27,6 +27,7 @@ Para assinar um grupo inteiro, use um curinga no `subscribed_types` do endpoint:
   "api_version": "v1",
   "schema_version": 1,
   "project_id": "proj_01J8...",
+  "external_ref": null,
   "sequence": 918273,
   "occurred_at": "2026-09-04T13:22:41.031Z",
   "recorded_at": "2026-09-04T13:22:41.244Z",
@@ -34,10 +35,13 @@ Para assinar um grupo inteiro, use um curinga no `subscribed_types` do endpoint:
     "id": "msg_01J8...",
     "channel": "chan_01J8...",
     "direction": "outbound",
+    "origin": "api",
     "from": "+5581988888888",
     "to": "+5581999999999",
     "content": { "type": "text", "body": "Olá! Seu pedido foi confirmado." },
+    "content_redacted_at": null,
     "status": "delivered",
+    "failure_code": null,
     "metadata": { "order_id": "1234" },
     "accepted_at": "2026-09-04T13:22:40.812Z",
     "sent_at": "2026-09-04T13:22:41.031Z",
@@ -52,11 +56,17 @@ Para assinar um grupo inteiro, use um curinga no `subscribed_types` do endpoint:
   Um evento de mensagem sempre carrega o estado completo da mensagem naquele momento. Se você perder `message.sent` mas receber `message.delivered`, ainda tem `sent_at` e todos os campos.
 </Note>
 
+Mensagens enviadas pelo app do WhatsApp Business não têm `message.accepted`, e o histórico importado na conexão do canal não gera evento algum. Veja [Mensagens enviadas pelo app do WhatsApp Business](/concepts/messages#mensagens-enviadas-pelo-app-do-whatsapp-business).
+
 ## Eventos de canal
 
 ### `channel.status_changed`
 
-Disparado quando o status de um canal muda, por exemplo quando ele passa a `degraded` por falhas de autenticação com o provedor. Aja cedo: um canal `degraded` precisa de atenção no painel.
+Disparado quando o status de um canal muda. Os casos mais comuns:
+
+- O canal passa a `degraded` por falhas de autenticação com o provedor. Aja cedo: um canal `degraded` precisa de atenção no painel.
+- O canal passa a `disabled` porque sua equipe o desativou, porque o cliente desconectou o número no app do WhatsApp Business ou porque o provedor removeu a conta.
+- Um canal `disabled` volta a `active` quando você o reativa no painel.
 
 `data` traz o canal e a transição:
 
@@ -65,6 +75,13 @@ Disparado quando o status de um canal muda, por exemplo quando ele passa a `degr
 | `channel_id` | Id do canal. |
 | `status` | Novo status: `pending`, `active`, `degraded` ou `disabled`. |
 | `previous_status` | Status anterior, ou `null` na criação. |
+| `connection_mode` | `cloud_api` ou `coexistence`. Veja [Modo de conexão](/concepts/data-model#modo-de-conexão). |
+| `reason` | Só quando o provedor causou a mudança: `disconnected_by_customer` (o cliente desconectou o número no app) ou `offboarded` (a conta foi removida). Ausente quando sua equipe desativou o canal. |
+| `disconnection_reason` | Só com `disconnected_by_customer`: o motivo da desconexão. Um entre `account_disconnected`, `business_downgrade`, `change_number`, `companion_inactivity`, `primary_inactivity`, `user_re_registered` e `unknown`. |
+
+<Info>
+  A exclusão de um canal desativado não gera evento. Um evento gravado antes de `connection_mode` existir não tem esse campo: ignore campos que você não reconhece.
+</Info>
 
 ```json
 {
@@ -73,13 +90,15 @@ Disparado quando o status de um canal muda, por exemplo quando ele passa a `degr
   "api_version": "v1",
   "schema_version": 1,
   "project_id": "proj_01J8...",
+  "external_ref": null,
   "sequence": 918400,
   "occurred_at": "2026-09-04T14:00:00.000Z",
   "recorded_at": "2026-09-04T14:00:00.120Z",
   "data": {
     "channel_id": "chan_01J8...",
     "status": "degraded",
-    "previous_status": "active"
+    "previous_status": "active",
+    "connection_mode": "cloud_api"
   }
 }
 ```
@@ -98,6 +117,10 @@ Disparado quando o status de um canal muda, por exemplo quando ele passa a `degr
 | `template.disabled` | O provedor desativou o template. |
 | `template.failed` | A Routa não conseguiu submeter o template ao provedor. Veja `failure_code` em `data`. |
 | `template.category_changed` | O provedor mudou a categoria do template. `data` traz também `previous_category`. |
+| `template.updated` | Um template `failed` ou `rejected` foi editado no painel e voltou para análise. `data` tem `status: "submitted"`. |
+| `template.deleted` | O template foi removido. `data` é o template no último estado. |
+
+`template.deleted` sai quando a remoção termina. Um template que nunca chegou ao provedor, ou que está `disabled`, é removido na hora. Os demais ficam com `deletion_requested: true` até o provedor confirmar a exclusão. Um template removido porque deixou de existir no WhatsApp, descoberto na sincronização, e os templates apagados junto com um canal **não** geram evento.
 
 A importação de um template que já existia no WhatsApp **não** gera evento. Veja [Templates importados](/concepts/templates#templates-importados).
 
@@ -108,6 +131,7 @@ A importação de um template que já existia no WhatsApp **não** gera evento. 
   "api_version": "v1",
   "schema_version": 1,
   "project_id": "proj_01J8...",
+  "external_ref": null,
   "sequence": 918500,
   "occurred_at": "2026-09-04T15:10:00.000Z",
   "recorded_at": "2026-09-04T15:10:00.200Z",
@@ -117,10 +141,14 @@ A importação de um template que já existia no WhatsApp **não** gera evento. 
     "name": "confirmacao_pedido",
     "language": "pt_BR",
     "category": "utility",
+    "body_text": "Olá {{1}}! Seu pedido {{2}} foi confirmado.",
     "variables": [{ "index": 1 }, { "index": 2 }],
     "status": "approved",
     "rejection_reason": null,
     "failure_code": null,
+    "failure_detail": null,
+    "deletion_requested": false,
+    "deletion_failure_detail": null,
     "origin": "routa",
     "read_only": false,
     "unsupported_components": [],
@@ -139,6 +167,7 @@ A importação de um template que já existia no WhatsApp **não** gera evento. 
   "api_version": "v1",
   "schema_version": 1,
   "project_id": "proj_01J8...",
+  "external_ref": null,
   "sequence": 918600,
   "occurred_at": "2026-09-04T16:30:00.000Z",
   "recorded_at": "2026-09-04T16:30:00.180Z",
@@ -149,10 +178,14 @@ A importação de um template que já existia no WhatsApp **não** gera evento. 
     "language": "pt_BR",
     "category": "marketing",
     "previous_category": "utility",
+    "body_text": "Olá {{1}}! Seu pedido {{2}} foi confirmado.",
     "variables": [{ "index": 1 }, { "index": 2 }],
     "status": "approved",
     "rejection_reason": null,
     "failure_code": null,
+    "failure_detail": null,
+    "deletion_requested": false,
+    "deletion_failure_detail": null,
     "origin": "routa",
     "read_only": false,
     "unsupported_components": [],

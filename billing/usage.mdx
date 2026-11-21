@@ -76,6 +76,10 @@ A resposta tem **uma linha por combinação** de `metric`, `channel_type` e `pro
 
 A lista de métricas é fechada: novas métricas podem ser adicionadas, mas as existentes nunca são renomeadas.
 
+<Info>
+  As mensagens que a empresa envia pelo app do WhatsApp Business, em um canal em modo de coexistência, **não entram** no uso: nem as métricas de envio, nem as de entrega ou falha delas. O mesmo vale para o histórico importado no momento da conexão. Veja [Mensagens enviadas pelo app do WhatsApp Business](/concepts/messages#mensagens-enviadas-pelo-app-do-whatsapp-business).
+</Info>
+
 ## Como o uso é registrado
 
 - O uso faturável é gravado **na mesma transação** da mudança de estado que o causou. Por isso ele não "deriva" do que realmente aconteceu.

@@ -17,6 +17,7 @@ Cada mudança relevante gera um **evento**: um fato imutável sobre um recurso. 
   "api_version": "v1",
   "schema_version": 1,
   "project_id": "proj_01J8...",
+  "external_ref": null,
   "sequence": 918273,
   "occurred_at": "2026-09-04T13:22:41.031Z",
   "recorded_at": "2026-09-04T13:22:41.244Z",
@@ -37,6 +38,7 @@ Cada mudança relevante gera um **evento**: um fato imutável sobre um recurso. 
 | `api_version` | Versão do formato público do recurso em `data`. Hoje, `v1`. |
 | `schema_version` | Versão do envelope do evento. Hoje, `1`. |
 | `project_id` | Projeto dono do evento. |
+| `external_ref` | O identificador que um parceiro deu ao projeto do seu cliente, ou `null` em um projeto comum. Está sempre presente. Veja [Parceiros](/partners/overview). |
 | `sequence` | Número monotônico, útil para detectar lacunas. **Não** é uma promessa de ordem de entrega. |
 | `occurred_at` | Quando o fato ocorreu. |
 | `recorded_at` | Quando a Routa registrou o evento. |
@@ -54,7 +56,7 @@ Como `data` traz o recurso completo, um consumidor que processa apenas o último
 | `message.read` | O destinatário leu a mensagem. | Mensagem |
 | `message.failed` | A mensagem falhou de forma terminal. | Mensagem |
 | `message.received` | Uma mensagem foi recebida de um cliente. | Mensagem |
-| `channel.status_changed` | O status de um canal mudou. | `channel_id`, `status`, `previous_status` |
+| `channel.status_changed` | O status de um canal mudou. | `channel_id`, `status`, `previous_status`, `connection_mode`, e às vezes `reason` e `disconnection_reason` |
 | `template.submitted` | Um template foi enviado para aprovação. | [Template](/concepts/templates) |
 | `template.pending` | A análise do template está em andamento. | Template |
 | `template.approved` | O template foi aprovado. | Template |
@@ -63,6 +65,8 @@ Como `data` traz o recurso completo, um consumidor que processa apenas o último
 | `template.disabled` | O provedor desativou o template. | Template |
 | `template.failed` | A Routa não conseguiu submeter o template ao provedor. | Template |
 | `template.category_changed` | O provedor mudou a categoria do template. | Template, mais `previous_category` |
+| `template.updated` | Um template `failed` ou `rejected` foi editado e reenviado para análise. | Template |
+| `template.deleted` | Um template foi removido. | Template, no último estado |
 
 Veja os detalhes de cada tipo em [Tipos de evento](/webhooks/event-types).
 

@@ -15,6 +15,8 @@ A Routa limita as requisições por **projeto** para proteger a plataforma. Os l
 
 Os valores são por projeto. Se a sua operação precisa de mais, fale com a Routa: elevar o limite de um projeto é uma configuração, não um deploy.
 
+A [API de parceiros](/partners/overview) tem um limite próprio, **por organização**: 10 req/s sustentadas, com rajada de 30, somando todas as rotas `/v1/partner/*`. Esse valor não pode ser elevado por projeto.
+
 <Info>
   O envio de uma mensagem só consome o limite de **envios**. Ele não disputa tokens com as suas leituras.
 </Info>

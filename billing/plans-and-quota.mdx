@@ -3,7 +3,7 @@ title: "Planos e franquia"
 description: "Como a franquia de mensagens do seu plano funciona, o que acontece quando ela acaba e como habilitar o excedente."
 ---
 
-Cada organização tem um **plano**, e cada plano inclui uma **franquia** de mensagens por período de cobrança, além de limites de projetos e de canais. Valores e condições dos planos estão no [site da Routa](https://routa.chat). A contratação e a gestão da assinatura são feitas no painel.
+Cada organização tem um **plano**, e cada plano inclui uma **franquia** de mensagens por período de cobrança, além de limites de projetos e de canais por projeto. Valores e condições dos planos estão no [site da Routa](https://routa.chat). A contratação e a gestão da assinatura são feitas no painel.
 
 <Info>
   Os endpoints de cobrança (`/v1/billing`) são do painel e usam sessão de usuário. Uma chave de API não compra nem altera planos.
@@ -17,6 +17,7 @@ Cada organização tem um **plano**, e cada plano inclui uma **franquia** de men
 - Uma repetição idempotente (mesma `Idempotency-Key`) **não consome nada**.
 - Mensagens **recebidas** nunca contam nem são bloqueadas, porque recusar uma mensagem recebida perderia o dado do seu cliente.
 - [Projetos de teste](/environments) não são contados nem bloqueados.
+- Mensagens que a empresa envia pelo app do WhatsApp Business, em um canal conectado em modo de coexistência, **não consomem franquia**. Elas têm `origin: "business_app"`. Veja [Mensagens enviadas pelo app do WhatsApp Business](/concepts/messages#mensagens-enviadas-pelo-app-do-whatsapp-business).
 
 ## Mensagens grátis
 
@@ -73,7 +74,7 @@ Você muda de plano pelo portal de cobrança, aberto no painel. Valores e nomes 
 O excedente deixa você continuar enviando acima da franquia, com um **teto em número de mensagens** definido por você.
 
 - É **opt-in**: nada é cobrado a mais sem você habilitar.
-- Exige pagamento por **cartão**, e nem todo plano oferece excedente.
+- Exige uma assinatura em situação regular paga por **cartão**. Uma assinatura paga com Pix, um período de teste, um pagamento atrasado e um plano que não vende excedente não podem usá-lo.
 - É cobrado **uma vez, depois do fechamento** do período: as mensagens acima da franquia entram como um item na fatura seguinte. O envio nunca chama o provedor de pagamento.
 - O custo máximo por período é limitado pelo teto que você escolheu.
 
@@ -88,9 +89,21 @@ Se o pagamento falha e a assinatura fica `past_due`, você não é bloqueado na 
 
 Passado isso, os envios retornam `402` com o código `payment_failed`. Atualize a forma de pagamento no painel para voltar a enviar.
 
+Uma assinatura paga com **Pix** é pré-paga. Se o período termina sem renovação, vale a mesma tolerância de 3 dias ou 10% da franquia, contada a partir do fim do período. Depois dela, os envios também retornam `payment_failed`.
+
+## Quando o envio é recusado por causa da assinatura
+
+Além de `message_quota_exceeded`, `free_messages_exhausted` e `payment_failed`, a assinatura pode recusar um envio com `402 subscription_required`:
+
+- A assinatura foi cancelada ou não foi paga.
+- A assinatura foi cancelada para o fim do período, e o período acabou.
+- O período de cobrança da assinatura ainda não foi aberto. Isso dura pouco: tente de novo em instantes.
+
+Durante um **período de teste**, a franquia é limitada à do plano mais básico, mesmo que você tenha escolhido um plano maior. Veja os valores no [site da Routa](https://routa.chat).
+
 ## Limites do plano
 
-Além da franquia, o plano limita o número de projetos e de canais. Ao ultrapassá-los, o painel recusa a criação com `project_limit_exceeded` ou `channel_limit_exceeded`, com `details.limit` indicando o máximo.
+Além da franquia, o plano limita o número de projetos da organização e o número de canais **por projeto**. Ao ultrapassá-los, o painel recusa a criação com `project_limit_exceeded` ou `channel_limit_exceeded`, com `details.limit` indicando o máximo.
 
 ## Monitorar o consumo
 

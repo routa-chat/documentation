@@ -41,9 +41,18 @@ Um canal só envia mensagens quando está `active`.
 | `pending` | Conexão em andamento. |
 | `active` | Conectado e apto a enviar. |
 | `degraded` | A Routa não consegue autenticar no provedor (por exemplo, credencial expirada). Reconecte ou rotacione a credencial no painel. |
-| `disabled` | Desativado. |
+| `disabled` | Desativado: pela sua equipe no painel, porque o cliente desconectou o número no app do WhatsApp Business, ou porque o provedor removeu a conta. Não envia. Quem ativa de novo é você, no painel. |
 
-Enviar por um canal que não está `active` retorna `422` com o código `channel_inactive`. Mudanças de estado geram o evento `channel.status_changed`.
+Enviar por um canal que não está `active` retorna `422` com o código `channel_inactive`. Mudanças de estado, inclusive a reativação de um canal `disabled`, geram o evento `channel.status_changed`. Veja [os campos do evento](/webhooks/event-types#eventos-de-canal).
+
+### Modo de conexão
+
+Um canal tem um modo de conexão, que aparece em `connection_mode` no evento `channel.status_changed`:
+
+| Modo | Significado |
+| --- | --- |
+| `cloud_api` | O número é usado só pela Routa. |
+| `coexistence` | O número continua no app do WhatsApp Business, e a empresa pode enviar e receber por lá. Veja [Mensagens enviadas pelo app do WhatsApp Business](/concepts/messages#mensagens-enviadas-pelo-app-do-whatsapp-business). |
 
 <Info>
   A conexão e o gerenciamento de canais são feitos no painel. As credenciais do provedor nunca são retornadas pela API.

@@ -73,7 +73,7 @@ Veja [Reconciliar eventos](/webhooks/reconciliation).
 
 ## O que significa `failed`
 
-`failed` é terminal. Ocorre quando o provedor rejeita a mensagem de forma definitiva ou quando as tentativas de envio se esgotam. Falhas transitórias são retentadas automaticamente pela Routa e **não** aparecem como status. O motivo detalhado da falha fica na linha do tempo da mensagem, no painel.
+`failed` é terminal. Ocorre quando o provedor rejeita a mensagem de forma definitiva ou quando as tentativas de envio se esgotam. Falhas transitórias são retentadas automaticamente pela Routa e **não** aparecem como status. O campo `failure_code` da mensagem traz o motivo (veja [Motivos de falha](/concepts/messages#motivos-de-falha)), e a linha do tempo da mensagem, no painel, mostra o detalhe.
 
 <Info>
   Se uma mensagem permanece `accepted` por muito tempo, geralmente há uma indisponibilidade do provedor ou o canal está com uma fila acima da capacidade. A mensagem não se perde: ela é enviada assim que o caminho normaliza.

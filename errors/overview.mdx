@@ -13,9 +13,9 @@ Todo erro de negócio tem a mesma estrutura, no estilo de APIs de pagamento que 
 {
   "error": {
     "type": "invalid_request_error",
-    "code": "channel_inactive",
-    "message": "Channel chan_01J8... is not active and cannot send messages.",
-    "param": "channel",
+    "code": "template_name_invalid",
+    "message": "A template name may only contain lowercase letters, digits and underscores (a-z, 0-9, _), up to 512 characters.",
+    "param": "name",
     "request_id": "req_01J8..."
   }
 }
@@ -26,8 +26,8 @@ Todo erro de negócio tem a mesma estrutura, no estilo de APIs de pagamento que 
 | `type` | A categoria do erro. Veja a tabela abaixo. |
 | `code` | Identificador **estável** e legível por máquina. Use-o na sua lógica. |
 | `message` | Texto para humanos, em inglês. Pode mudar: **não** faça parse dele. |
-| `param` | O campo da requisição com problema, quando se aplica. |
-| `doc_url` | Link para a documentação do código. Presente apenas em alguns erros. |
+| `param` | O campo da requisição com problema, quando se aplica. Hoje só os erros de template o preenchem. Veja [Erros de templates](/errors/error-codes#templates). |
+| `doc_url` | Reservado para um link à documentação do código. Hoje nenhum erro o traz: ignore-o se aparecer. |
 | `details` | Objeto opcional com valores numéricos ou textuais acionáveis (veja abaixo). |
 | `request_id` | Identificador da requisição (`req_...`). Informe-o ao falar com o suporte. |
 
@@ -46,6 +46,7 @@ Alguns erros trazem `details` com valores que você pode usar programaticamente:
 | `message_quota_exceeded` | `limit` (franquia do período), `used` (usado) e `resets_at` (quando a franquia renova, ISO 8601). |
 | `free_messages_exhausted` | `limit` (mensagens grátis) e `used` (usado). Não traz `resets_at`, porque essa franquia não renova. |
 | `project_limit_exceeded`, `channel_limit_exceeded` | `limit`. |
+| `project_not_deletable` | `reason`: `has_enabled_channel` ou `last_project`. |
 | `insufficient_permission` | `permission` (a capacidade exigida). |
 
 ## Tipos de erro
@@ -53,7 +54,7 @@ Alguns erros trazem `details` com valores que você pode usar programaticamente:
 | `type` | Status | Significado |
 | --- | --- | --- |
 | `invalid_request_error` | `411`, `413`, `422` | A requisição é inválida. Corrija antes de tentar de novo. |
-| `authentication_error` | `401` | Chave ausente, inválida, revogada ou expirada. |
+| `authentication_error` | `401` | Chave ausente, inválida, revogada ou expirada. Nas rotas de parceiro, a chave de parceiro. |
 | `permission_error` | `403` | A chave é válida, mas não tem o escopo necessário. |
 | `not_found_error` | `404` | O recurso não existe **ou** pertence a outro projeto. |
 | `conflict_error` | `409` | Conflito de idempotência ou de estado. |

@@ -26,6 +26,10 @@ rt_{live|test}_{segredo}
 | `rt_live_` | Projeto de produção. |
 | `rt_test_` | Projeto de teste. Veja [Ambientes](/environments). |
 
+<Info>
+  Uma chave de parceiro, no formato `rt_partner_…`, **não** é uma chave de projeto. Ela só vale nas rotas `/v1/partner/*` e nunca envia mensagens. Em qualquer rota desta documentação ela recebe `401 api_key_invalid`, e uma chave de projeto também não vale nas rotas de parceiro. Veja [Chaves de parceiro](/partners/partner-keys).
+</Info>
+
 A chave é gerada com um gerador criptográfico e **exibida uma única vez**, no momento da criação. A Routa guarda apenas um hash dela, então não é possível recuperá-la depois. Se perder a chave, crie outra e revogue a antiga.
 
 ## O que você pode fazer com suas chaves

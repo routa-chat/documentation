@@ -116,4 +116,6 @@ O objeto do endpoint traz `consecutive_failures`, `last_success_at` e `last_fail
 
 ## Isolamento
 
-As entregas de webhook rodam em uma fila e em workers próprios. Um endpoint lento seu nunca atrasa o envio de mensagens, nem o de outros clientes. A concorrência por endpoint é limitada, e endpoints consistentemente lentos são desacelerados automaticamente.
+As entregas de webhook rodam em uma fila e em workers próprios. Um endpoint lento seu nunca atrasa o envio de mensagens, nem o de outros clientes. Cada endpoint recebe no máximo **8 entregas ao mesmo tempo**. Se as respostas dele ficam consistentemente acima de 5 segundos, a Routa reduz esse limite para **1 entrega por vez**, até o endpoint voltar a responder rápido. Responda com `2xx` logo e processe o trabalho depois.
+
+O endpoint de webhook de uma organização parceira, que recebe os eventos de todos os seus clientes, tem um limite maior: 32 entregas simultâneas. Veja [Webhook da organização](/partners/webhook).

@@ -14,6 +14,7 @@ draft → submitted → pending → approved
                             → rejected
         submitted → failed             (a Routa não conseguiu submeter)
 approved → paused | disabled           (o provedor pode fazer isso a qualquer momento)
+failed | rejected → submitted         (edição no painel)
 ```
 
 | Status | Significado |
@@ -29,7 +30,18 @@ approved → paused | disabled           (o provedor pode fazer isso a qualquer 
 
 `rejected` e `failed` não são a mesma coisa. Em `rejected`, o provedor analisou o template e o recusou. Em `failed`, a análise nem aconteceu, porque a submissão não chegou ao fim.
 
-Cada mudança gera um evento (`template.submitted`, `template.pending`, `template.approved`, `template.rejected`, `template.paused`, `template.disabled`, `template.failed`). Assine `template.*` para acompanhar a aprovação sem consultar a API. O evento `template.category_changed` avisa quando o provedor muda a categoria de um template. Veja [Tipos de evento](/webhooks/event-types#eventos-de-template).
+Cada mudança gera um evento (`template.submitted`, `template.pending`, `template.approved`, `template.rejected`, `template.paused`, `template.disabled`, `template.failed`, `template.updated`, `template.deleted`). Assine `template.*` para acompanhar a aprovação sem consultar a API. O evento `template.category_changed` avisa quando o provedor muda a categoria de um template. `template.updated` avisa que um template `failed` ou `rejected` foi editado e reenviado, e `template.deleted`, que ele foi removido. Veja [Tipos de evento](/webhooks/event-types#eventos-de-template).
+
+### Campos do template
+
+Além de `id`, `channel`, `name`, `language`, `category`, `variables`, `components`, `status` e os campos de motivo, o template traz:
+
+| Campo | Descrição |
+| --- | --- |
+| `body_text` | O corpo como foi escrito, com os placeholders `{{1}}`, `{{2}}`. É `null` só em um template importado e somente leitura, que a Routa não consegue reproduzir. |
+| `failure_detail` | A frase do próprio provedor sobre a recusa, só enquanto `status` é `failed` e quando o provedor a deu. Caso contrário, é `null`. É um texto para pessoas: não compare com ele, use `failure_code`. |
+| `deletion_requested` | `true` desde que a exclusão foi aceita até o template sair da lista. Nesse intervalo, ele não pode ser usado para enviar. |
+| `deletion_failure_detail` | Por que a última exclusão não terminou, quando o provedor deu um motivo. É `null` se nenhuma exclusão falhou. |
 
 ### Motivos de rejeição
 
@@ -59,7 +71,7 @@ A Routa tenta submeter o template ao provedor **até 5 vezes**, com esperas cres
 | `media_unavailable` | O arquivo do cabeçalho de mídia não está mais disponível. Envie a mídia de novo. |
 | `attempts_exhausted` | As tentativas acabaram sem que um motivo mais específico fosse registrado. |
 
-Você não consegue reenviar um template `failed`. Crie o template de novo com `POST /v1/templates`.
+Pela API, você não reenvia um template `failed`: crie o template de novo com `POST /v1/templates`. No painel, é possível [editar e reenviar](#editar-e-excluir-um-template) um template `failed` ou `rejected`.
 
 <Note>
   Uma submissão que falhou pode ter chegado ao provedor sem que a Routa visse a resposta. Nesse caso, o provedor ainda pode responder depois, e o template sai de `failed` para `pending`, `approved` ou `rejected`. Trate `failed` como um estado que a resposta do provedor pode corrigir.
@@ -76,7 +88,7 @@ Além dos templates que você cria pela API, a Routa lista os que **já existiam
 | `unsupported_components` | Lista dos componentes que a Routa não consegue reproduzir. Vazia quando `read_only` é `false`. |
 
 <Warning>
-  Um template com `read_only: true` aparece na listagem, mas **não pode ser usado para enviar**. `POST /v1/messages` com ele retorna `422 template_not_sendable`. Crie na API um template equivalente ou use outro.
+  Um template com `read_only: true` aparece na listagem, mas **não pode ser usado para enviar**. `POST /v1/messages` com ele retorna `422 template_not_sendable`. Se ele estiver `failed` ou `rejected`, você pode [editá-lo no painel](#editar-e-excluir-um-template). Depois da edição, ele deixa de ser somente leitura. Nos demais casos, crie um template equivalente pela API ou use outro.
 </Warning>
 
 A importação é **silenciosa**: ela não gera evento nem webhook, porque você não fez nada para o template aparecer. Consulte `GET /v1/templates` para ver o que foi importado.
@@ -180,7 +192,53 @@ Até **10 botões**, na ordem em que você os enviar. O texto de cada botão tem
 | `phone_number` | `phone_number` | No máximo um botão desse tipo por template. |
 | `url` | `url` | A URL pode conter exatamente uma variável `{{1}}`. |
 
-Um componente fora dessas regras retorna `422` com o código `template_components_invalid`.
+Um componente fora dessas regras retorna `422` com o código `template_components_invalid`. Veja as regras completas em [Regras de validação no aceite](#regras-de-validação-no-aceite).
+
+## Regras de validação no aceite
+
+A Routa recusa **na hora**, com `422`, o que o WhatsApp já é conhecido por recusar. Sem isso, o template ficaria `failed` minutos depois. O campo `param` do erro aponta a parte a corrigir.
+
+| Parte | Regra | Erro e `param` |
+| --- | --- | --- |
+| Nome | Só `a-z`, `0-9` e `_`, até 512 caracteres. | `template_name_invalid`, `name` |
+| Corpo | Até 1024 caracteres. | `template_components_invalid`, `body_text` |
+| Corpo | Não pode começar nem terminar com uma variável `{{n}}`. Escreva texto antes da primeira e depois da última. | `template_variables_invalid` |
+| Cabeçalho | Texto de até 60 caracteres e no máximo uma variável. | `template_components_invalid`, `components.header` |
+| Rodapé | Até 60 caracteres. | `template_components_invalid`, `components.footer` |
+| Botões | No máximo 10, 1 de telefone e 2 de URL. | `template_components_invalid`, `components.buttons` |
+| Botões | As respostas rápidas ficam juntas, antes ou depois dos outros botões, sem se misturar entre eles. | `template_components_invalid`, `components.buttons` |
+| Botão | Texto de até 25 caracteres. | `template_components_invalid`, `components.buttons` |
+| Botão de URL | Até 2000 caracteres. A variável `{{1}}` só pode estar no fim da URL. | `template_components_invalid`, `components.buttons` |
+| Botão de URL | Não pode apontar para `api.whatsapp.com`. | `template_components_invalid`, `components.buttons` |
+| Botão de telefone | O número tem até 20 caracteres. | `template_components_invalid`, `components.buttons` |
+| Categoria `authentication` | Não aceita botões personalizados. | `template_components_invalid`, `components.buttons` |
+
+<Note>
+  Passar nessas regras não garante a aprovação. O WhatsApp decide, e pode recusar um template por outros motivos.
+</Note>
+
+## Editar e excluir um template
+
+Editar e excluir um template são ações do **painel**. A API de dados não as expõe, mas você vê o resultado delas nos campos do template e nos eventos.
+
+### Editar
+
+- Só é possível editar um template `failed` ou `rejected`, inclusive um importado do WhatsApp. Um template com a exclusão pedida não pode ser editado.
+- A edição substitui a categoria, o corpo e todos os componentes. Nome e idioma não mudam.
+- O template volta para `submitted`, o motivo da recusa e `failure_detail` são limpos, e o evento `template.updated` é gerado. Depois, o ciclo segue como em uma nova submissão.
+- Um template importado e somente leitura deixa de ser `read_only` depois da edição, porque passa a ter um corpo e componentes que a Routa conhece. `origin` continua `provider`.
+
+### Excluir
+
+Qualquer template pode ser excluído. O que acontece depende de o WhatsApp já ter o template:
+
+- **Sem referência no provedor, ou `disabled`:** a Routa o remove na hora e gera `template.deleted`.
+- **Nos demais casos:** a exclusão é pedida e o template passa a ter `deletion_requested: true`. Enquanto isso, ele não pode ser usado para enviar (`template_not_sendable`) nem editado. Quando o provedor confirma, o template é removido e `template.deleted` é gerado.
+- **Se a exclusão não terminar**, o template volta ao normal com `deletion_requested: false`, e `deletion_failure_detail` traz o motivo, quando o provedor o deu. A Routa tenta algumas vezes antes de desistir.
+
+Segundo as regras do provedor, um template aprovado que foi excluído **não pode ser criado de novo com o mesmo nome por 30 dias**. Um template `disabled` apagado só na Routa pode voltar na próxima sincronização, se o provedor ainda o tiver.
+
+A remoção por sincronização (o template deixou de existir no WhatsApp) e a remoção junto com um canal não geram evento. A partir daí, um envio que cita o template responde `template_not_found`.
 
 ## Enviar um template
 
@@ -197,5 +255,5 @@ Com o template `approved`, envie-o em `POST /v1/messages` informando o `id` e os
 `text` e `template` são mutuamente exclusivos. A quantidade de `body_parameters` precisa ser igual à de variáveis do template. Veja o passo a passo em [Enviar um template](/guides/send-template-message).
 
 <Warning>
-  A Routa verifica o template **no aceite**. Se ele não estiver aprovado, a chamada falha na hora com `template_not_approved` (ou `template_paused`), em vez de gerar um `message.failed` depois. Um template importado e somente leitura falha com `template_not_sendable`.
+  A Routa verifica o template **no aceite**. Se ele não estiver aprovado, a chamada falha na hora com `template_not_approved` (ou `template_paused`), em vez de gerar um `message.failed` depois. Um template somente leitura, ou com exclusão em andamento, falha com `template_not_sendable`.
 </Warning>
