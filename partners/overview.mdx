@@ -1,0 +1,62 @@
+---
+title: "API de parceiros"
+description: "Visão geral da API de parceiros: como uma plataforma cria um projeto por cliente, conecta o número de cada um e recebe os eventos de todos."
+---
+
+A **API de parceiros** é para plataformas que revendem WhatsApp aos próprios clientes. Em vez de pedir a cada cliente que crie uma conta na Routa, você cria um projeto por cliente, emite a chave de API desse projeto e manda o cliente a uma página da Routa para conectar o número dele.
+
+<Warning>
+  A API de parceiros é **experimental no SDK** (`@routa-chat/sdk/partner`) e só está disponível em planos que a incluem. A Routa concede esse acesso: você não o ativa sozinho. Sem ele, toda chamada responde `404 partner_api_not_available`.
+</Warning>
+
+## Como as peças se encaixam
+
+| Peça | O que é |
+| --- | --- |
+| **Parceiro** | A sua organização na Routa, com um perfil de parceiro. |
+| **Projeto do cliente** | Um projeto por cliente. Você o identifica pelo seu próprio id, o `external_ref`. |
+| **Chave de API do projeto** | Uma chave por projeto. É ela, e não a chave de parceiro, que o tráfego do cliente usa. |
+| **Chave de parceiro** | A credencial `rt_partner_…` que cria projetos e emite chaves. Veja [Chaves de parceiro](/partners/partner-keys). |
+| **Link assinado** | O endereço que o cliente abre para conectar o número dele. Veja [Link assinado](/partners/signed-link). |
+| **Webhook da organização** | Um único endpoint de webhook que recebe os eventos de todos os projetos. Veja [Webhook da organização](/partners/webhook). |
+
+A chave de parceiro **nunca envia mensagens**. Em qualquer rota de dados (`/v1/messages`, `/v1/events`, `/v1/webhook_endpoints` e as demais), ela responde `401 api_key_invalid`. Depois do onboarding, o tráfego do cliente usa a chave de API do projeto dele, com o SDK `Routa` ou com a API de dados.
+
+## O que você faz uma vez, no painel
+
+Estes passos são feitos no painel, em **Configurações** (no painel, **Settings**), na aba **Partner**. A API não os faz por você. Isso é proposital: uma chave vazada não pode substituir a si mesma.
+
+1. Crie o perfil de parceiro. Você recebe o seu id (`ptn_…`) e o **segredo de assinatura**, que aparece uma única vez.
+2. Registre as **origens de redirecionamento** para onde os seus links podem devolver o cliente.
+3. Emita uma **chave de parceiro** (`rt_partner_…`), que também aparece uma única vez.
+
+Guarde a chave de parceiro e o segredo de assinatura no seu servidor, em um cofre de segredos. Nunca os coloque em uma página web, em um aplicativo móvel ou em um repositório público.
+
+## O ciclo de um cliente
+
+```text
+1. Criar o projeto do cliente         POST /v1/partner/projects
+2. Emitir a chave de API do projeto   POST /v1/partner/projects/{id}/api_keys
+3. Assinar o link e abri-lo           o cliente conecta o número no WhatsApp
+4. Confirmar                          GET /v1/partner/projects/{id}
+5. Enviar com a chave do projeto      POST /v1/messages
+6. (Opcional) Apagar o projeto        DELETE /v1/partner/projects/{id}
+```
+
+O passo a passo, com exemplos, está em [Onboarding de um cliente](/partners/onboarding).
+
+## Limites
+
+- **Taxa de requisições.** Todas as rotas `/v1/partner/*` compartilham um limite por organização: 10 requisições por segundo, com rajada de até 30. Ao exceder, a API responde `429` com o header `Retry-After`. Esse limite não pode ser alterado.
+- **Projetos.** O plano limita a quantidade de projetos da organização. Acima do limite, a criação de um projeto responde `402 project_limit_exceeded`. Um onboarding abandonado e um cliente que saiu ainda contam. Apague o projeto para devolver a vaga.
+
+## Referência da API
+
+| Recurso | Endpoints |
+| --- | --- |
+| Projetos | [Criar](/api-reference/endpoint/partner/create-project), [listar](/api-reference/endpoint/partner/list-projects), [consultar](/api-reference/endpoint/partner/retrieve-project), [renomear](/api-reference/endpoint/partner/update-project), [apagar](/api-reference/endpoint/partner/delete-project) |
+| Chaves de API do projeto | [Emitir](/api-reference/endpoint/partner/create-project-api-key), [rotacionar](/api-reference/endpoint/partner/rotate-project-api-key), [revogar](/api-reference/endpoint/partner/revoke-project-api-key) |
+| Canais | [Listar](/api-reference/endpoint/partner/list-channels), [apagar um canal desativado](/api-reference/endpoint/partner/delete-channel) |
+| Webhook da organização | [Consultar](/api-reference/endpoint/partner/retrieve-webhook), [configurar](/api-reference/endpoint/partner/set-webhook), [rotacionar o segredo](/api-reference/endpoint/partner/rotate-webhook-secret) |
+
+Para usar a API de parceiros pelo SDK Node.js, veja [Parceiros no SDK](/sdk/partner).

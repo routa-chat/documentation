@@ -1,0 +1,87 @@
+---
+title: "Chaves de parceiro"
+description: "Escopos, expiração, restrição por endereço e rotação das chaves de parceiro, e o que cada uma pode fazer."
+---
+
+A **chave de parceiro** (`rt_partner_…`) autentica a [API de parceiros](/partners/overview). Ela é uma credencial de organização: alcança **todos** os projetos de clientes que você criou. Trate-a como uma credencial de administrador.
+
+## Chave de parceiro e chave de projeto
+
+| | Chave de parceiro | Chave de projeto |
+| --- | --- | --- |
+| Formato | `rt_partner_…` | `rt_live_…` ou `rt_test_…` |
+| Valida em | Rotas `/v1/partner/*` | Rotas de dados (`/v1/messages`, `/v1/events` e as demais) |
+| Envia mensagens | Nunca | Sim, com o escopo `messages:write` |
+| Quem emite | Uma pessoa, no painel | Você, pela API de parceiros, ou uma pessoa, no painel |
+
+Uma chave de parceiro em uma rota de dados responde `401 api_key_invalid`. Uma chave de projeto em uma rota `/v1/partner/*` responde `401 partner_key_invalid`.
+
+## Escopos
+
+Uma chave nova tem apenas `projects:read` e `projects:write`. Os demais escopos são opt-in: peça cada um de propósito.
+
+| Escopo | Padrão | O que permite |
+| --- | --- | --- |
+| `projects:read` | Sim | Listar e consultar projetos e listar os canais. |
+| `projects:write` | Sim | Criar e renomear projetos. |
+| `api_keys:write` | Não | Emitir, rotacionar e revogar chaves de API de projeto. |
+| `webhooks:write` | Não | Consultar, configurar e rotacionar o segredo do [webhook da organização](/partners/webhook). Não existe um escopo só de leitura para ele. |
+| `channels:write` | Não | Apagar um canal desativado. |
+| `projects:delete` | Não | Apagar um projeto criado pela API de parceiros. |
+
+Sem o escopo necessário, a resposta é `403 insufficient_scope`.
+
+<Warning>
+  Com `api_keys:write`, uma chave vazada pode emitir uma chave de projeto com `messages:write` para **qualquer** cliente seu e, assim, enviar mensagens em nome de todos. Conceda esse escopo só quando precisar e combine-o com restrição por endereço e expiração.
+</Warning>
+
+## Restrição por endereço e expiração
+
+- **`expires_at`.** A chave deixa de valer a partir desse instante.
+- **`ip_allowlist`.** Lista os endereços de onde a chave pode ser usada. O IPv4 aceita endereço exato ou faixa CIDR. O IPv6 é comparado só pela string exata, sem faixas. Uma lista vazia significa sem restrição.
+
+Uma chave usada de um endereço bloqueado recebe a mesma resposta de uma chave desconhecida: `401 partner_key_invalid`.
+
+Restrinja a chave aos endereços dos seus servidores e defina uma expiração. Essas opções são definidas no painel, onde a chave é emitida.
+
+## Rotação e revogação
+
+- **Rotação.** O painel emite uma chave nova antes de você revogar a antiga, então os dois valores funcionam durante a troca.
+- **Revogar apaga a chave.** Depois de revogada, a chave deixa de existir. Revogar de novo informa que ela não existe.
+
+Emitir, listar, rotacionar e revogar chaves de parceiro é feito no painel, por um Owner ou Admin. Uma chave de parceiro **não** gerencia chaves de parceiro, o segredo de assinatura nem as origens de redirecionamento.
+
+## O que uma chave de parceiro alcança
+
+Somente projetos que a própria API de parceiros criou, isto é, projetos com `external_ref`. Os projetos que você criou no painel respondem `404 project_not_found` nessas rotas. A exceção é [`GET /v1/partner/webhook`](/api-reference/endpoint/partner/retrieve-webhook), que é da organização.
+
+A chave nunca lê um segredo que já existe (os segredos aparecem uma única vez) e nunca envia mensagens. Toda ação feita por ela é registrada no log de auditoria, com a chave como autor.
+
+## Apagar um canal desativado
+
+`DELETE /v1/partner/projects/{project_id}/channels/{channel_id}` apaga um canal. Escopo necessário: `channels:write`.
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE https://api.routa.chat/v1/partner/projects/proj_01J8.../channels/chan_01J8... \
+  -H "Authorization: Bearer $ROUTA_PARTNER_KEY"
+```
+
+```ts Node.js
+import { RoutaPartner } from '@routa-chat/sdk/partner'
+
+const partner = new RoutaPartner(process.env['ROUTA_PARTNER_KEY']!)
+
+await partner.channels.delete(projectId, channelId)
+```
+</CodeGroup>
+
+Só um canal `disabled` pode ser apagado. Qualquer outro responde `409 channel_not_disabled`. A exclusão remove o canal, a credencial e os templates dele, e libera o número. As mensagens, o uso e os eventos continuam existindo e citando o canal. Nada é alterado no WhatsApp.
+
+Um projeto ou canal que não é da sua organização responde `404`.
+
+Use isso quando o projeto de um cliente não pode ser apagado por causa de um canal desativado: apague o canal e depois o projeto. Veja [Onboarding de um cliente](/partners/onboarding#6-apague-o-projeto-de-um-cliente-para-devolver-a-vaga).
+
+## Limite de taxa
+
+Todas as rotas `/v1/partner/*` dividem um limite por organização: 10 requisições por segundo, com rajada de até 30. Ao exceder, a API responde `429` com o header `Retry-After`.

@@ -1,0 +1,119 @@
+---
+title: "Webhook da organização"
+description: "Receba em um único endpoint de webhook os eventos de todos os projetos dos seus clientes, cada um identificado por project_id e external_ref."
+---
+
+Com a API de parceiros, você não precisa registrar um endpoint de webhook por cliente. O **webhook da organização** é um único endpoint que recebe os eventos de **todos** os projetos da organização.
+
+Cada evento traz o `project_id` e o `external_ref` do projeto de origem. Você roteia pelo seu próprio id, sem manter uma tabela de correspondência.
+
+<Warning>
+  A API de parceiros é experimental no SDK. Os exemplos de Node.js usam `@routa-chat/sdk/partner`.
+</Warning>
+
+## Configure o endpoint
+
+`PUT /v1/partner/webhook` cria ou substitui o endpoint. Escopo necessário: `webhooks:write`.
+
+<CodeGroup>
+```bash cURL
+curl -X PUT https://api.routa.chat/v1/partner/webhook \
+  -H "Authorization: Bearer $ROUTA_PARTNER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://crm.exemplo.com/routa",
+    "subscribed_types": ["message.*", "channel.status_changed"]
+  }'
+```
+
+```ts Node.js
+import { RoutaPartner } from '@routa-chat/sdk/partner'
+
+const partner = new RoutaPartner(process.env['ROUTA_PARTNER_KEY']!)
+
+const { webhook, secret } = await partner.webhook.set({
+  url: 'https://crm.exemplo.com/routa',
+  subscribedTypes: ['message.*', 'channel.status_changed'],
+})
+```
+</CodeGroup>
+
+| Campo | Descrição |
+| --- | --- |
+| `url` | Endereço `https://` que recebe as entregas. O host precisa resolver para um endereço público. Um endereço inválido responde `422 invalid_webhook_url`. |
+| `subscribed_types` | Lista de tipos de evento ou curingas, com pelo menos um item. Um valor inválido responde `422 invalid_subscribed_types`. |
+
+Em `subscribed_types`, use um tipo de evento exato, como `message.delivered`, ou um curinga de um grupo: `message.*`, `channel.*` ou `template.*`. Um `*` sozinho não é aceito. Veja os tipos em [Tipos de evento](/webhooks/event-types).
+
+## Criação e atualização
+
+`PUT` é idempotente:
+
+- **Na primeira chamada**, a Routa cria o endpoint e responde `201` com o segredo de assinatura. O segredo aparece **uma única vez**. Guarde-o.
+- **Nas chamadas seguintes**, a Routa substitui a URL e os tipos, ativa o endpoint de novo e responde `200`, sem o segredo. O segredo existente não muda.
+
+Reativar o endpoint com um `PUT` é o jeito de recolocá-lo no ar depois que ele foi desativado por falhas consecutivas.
+
+`GET /v1/partner/webhook` consulta o endpoint e nunca devolve o segredo. Se nenhum endpoint foi configurado, a resposta é `404 webhook_endpoint_not_found`.
+
+## O envelope
+
+Os eventos têm o mesmo formato dos eventos de um projeto. Dois campos identificam o cliente:
+
+| Campo | Descrição |
+| --- | --- |
+| `project_id` | O id do projeto de origem. |
+| `external_ref` | O seu id para o cliente, ou `null` quando o projeto não tem `external_ref`, como os projetos criados no painel. |
+
+```json
+{
+  "id": "evt_01J8...",
+  "type": "message.delivered",
+  "api_version": "v1",
+  "schema_version": 1,
+  "project_id": "proj_01J8...",
+  "external_ref": "lead_123",
+  "sequence": 918273,
+  "occurred_at": "2026-11-21T13:22:41.031Z",
+  "recorded_at": "2026-11-21T13:22:41.120Z",
+  "data": { "...": "..." }
+}
+```
+
+Veja todos os campos em [Eventos](/concepts/events).
+
+O endpoint da organização recebe os eventos de todos os projetos da organização, inclusive os de projetos criados no painel. Para esses, o `external_ref` é `null`.
+
+Você também pode manter endpoints de webhook em projetos individuais. Nesse caso, você recebe as duas entregas.
+
+## Assinatura e retentativas
+
+As entregas são assinadas, retentadas e reenviadas exatamente como as de um projeto. Verifique cada uma com o segredo do endpoint da organização:
+
+- [Verificar assinaturas](/webhooks/signatures)
+- [Retentativas e reenvio](/webhooks/retries-and-replay)
+
+No SDK Node.js, `partner.webhook.constructEvent()` verifica a assinatura e devolve o evento tipado. Veja [Receber os eventos de todos os clientes](/sdk/partner#receber-os-eventos-de-todos-os-clientes).
+
+## Rotacione o segredo
+
+`POST /v1/partner/webhook/rotate_secret` emite um novo segredo e o devolve uma única vez. O segredo anterior continua assinando as entregas por **24 horas**, para você trocar sem perder eventos. Escopo necessário: `webhooks:write`.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.routa.chat/v1/partner/webhook/rotate_secret \
+  -H "Authorization: Bearer $ROUTA_PARTNER_KEY"
+```
+
+```ts Node.js
+const rotated = await partner.webhook.rotateSecret()
+
+// rotated.secret aparece uma única vez.
+```
+</CodeGroup>
+
+Se nenhum endpoint foi configurado, a resposta é `404 webhook_endpoint_not_found`. Um Owner ou Admin também pode ver o estado do endpoint e rotacionar o segredo no painel, em **Configurações** (no painel, **Settings**), na aba **Partner**, na seção **Webhook**.
+
+## Simultaneidade
+
+Um endpoint com muitos clientes é o gargalo de todos eles. Por isso, a Routa mantém no máximo **32 entregas simultâneas** para o endpoint da organização, contra 8 para o endpoint de um projeto. Responda rápido e processe o trabalho em uma fila do seu lado.

@@ -79,6 +79,16 @@
               "billing/usage",
               "billing/plans-and-quota"
             ]
+          },
+          {
+            "group": "Parceiros",
+            "pages": [
+              "partners/overview",
+              "partners/onboarding",
+              "partners/signed-link",
+              "partners/partner-keys",
+              "partners/webhook"
+            ]
           }
         ]
       },
@@ -148,6 +158,39 @@
             "pages": [
               "api-reference/endpoint/identity/whoami"
             ]
+          },
+          {
+            "group": "Parceiros",
+            "pages": [
+              {
+                "group": "Projetos",
+                "pages": [
+                  "api-reference/endpoint/partner/create-project",
+                  "api-reference/endpoint/partner/list-projects",
+                  "api-reference/endpoint/partner/retrieve-project",
+                  "api-reference/endpoint/partner/update-project",
+                  "api-reference/endpoint/partner/delete-project",
+                  "api-reference/endpoint/partner/create-project-api-key",
+                  "api-reference/endpoint/partner/rotate-project-api-key",
+                  "api-reference/endpoint/partner/revoke-project-api-key"
+                ]
+              },
+              {
+                "group": "Canais",
+                "pages": [
+                  "api-reference/endpoint/partner/list-channels",
+                  "api-reference/endpoint/partner/delete-channel"
+                ]
+              },
+              {
+                "group": "Webhook da organização",
+                "pages": [
+                  "api-reference/endpoint/partner/retrieve-webhook",
+                  "api-reference/endpoint/partner/set-webhook",
+                  "api-reference/endpoint/partner/rotate-webhook-secret"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -165,16 +208,20 @@
             "group": "Recursos",
             "pages": [
               "sdk/messages",
+              "sdk/templates",
+              "sdk/media",
               "sdk/webhooks",
               "sdk/pagination",
-              "sdk/resources"
+              "sdk/resources",
+              "sdk/partner"
             ]
           },
           {
             "group": "Guias",
             "pages": [
               "sdk/error-handling",
-              "sdk/typescript"
+              "sdk/typescript",
+              "sdk/upgrading"
             ]
           }
         ]

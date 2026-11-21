@@ -1,0 +1,192 @@
+---
+title: "Link assinado"
+description: "Como montar e assinar o link que o cliente abre para conectar o número: parâmetros, assinatura HMAC, vetores de teste e o retorno para o seu site."
+---
+
+O cliente conecta o número dele em uma página da Routa. Você o envia a ela com um **link assinado**:
+
+```text
+https://app.routa.chat/connect/{partner_id}?…
+```
+
+A assinatura prova que o link vem de você. Ela usa o **segredo de assinatura** do seu perfil de parceiro, que é diferente da chave de parceiro. Assine sempre no seu servidor.
+
+## Parâmetros
+
+O link leva estes parâmetros e **nada além disso**. Um parâmetro desconhecido ou repetido torna o link inválido.
+
+| Parâmetro | Obrigatório | O que é |
+| --- | --- | --- |
+| `partner_id` | Sim | O seu id `ptn_…`, mostrado no painel. |
+| `external_ref` | Sim | O seu id para o cliente: de 1 a 128 caracteres entre `A-Z a-z 0-9 . _ : -`. Nunca um e-mail, um telefone ou um nome. |
+| `ts` | Sim | O momento em que você montou o link, em segundos Unix. |
+| `signature` | Sim | O HMAC abaixo, com 64 caracteres hexadecimais minúsculos. |
+| `name` | Não | Como o projeto se chama, com até 200 caracteres. O padrão é o `external_ref`. |
+| `redirect_url` | Não | `https://…`, em uma origem que você registrou no painel, com até 2048 caracteres. |
+| `state` | Não | Valor opaco de até 256 caracteres. Volta inalterado para o seu `redirect_url`. |
+
+Um parâmetro opcional que você não usa fica de fora. Um parâmetro vazio torna o link inválido. Nenhum valor pode conter quebra de linha.
+
+O primeiro link válido cria o projeto do cliente, caso ele ainda não exista.
+
+## A assinatura
+
+`signature` é um **HMAC-SHA256**, em hexadecimal minúsculo, com o seu segredo de assinatura como chave, calculado sobre esta string e nada mais:
+
+```text
+routa-partner-link-v1
+external_ref=<valor>
+name=<valor>            (só se você enviar)
+partner_id=<valor>
+redirect_url=<valor>    (só se você enviar)
+state=<valor>           (só se você enviar)
+ts=<valor>
+```
+
+- A primeira linha é a etiqueta fixa `routa-partner-link-v1`. Cada linha seguinte é `nome=valor` para todo parâmetro que você envia, **exceto** `signature`.
+- Os nomes ficam em **ordem crescente de bytes** (`external_ref`, `name`, `partner_id`, `redirect_url`, `state`, `ts`), separados por um único `\n`, **sem quebra de linha no final**.
+- Os valores são as strings **decodificadas**, exatamente o que você coloca no link, antes de qualquer codificação de URL.
+
+<CodeGroup>
+```ts Node.js (SDK)
+import { buildOnboardingLink } from '@routa-chat/sdk/partner'
+
+const url = await buildOnboardingLink({
+  partnerId: process.env['ROUTA_PARTNER_ID']!,
+  signingSecret: process.env['ROUTA_PARTNER_SIGNING_SECRET']!,
+  externalRef: 'lead_123',
+  name: 'Loja do Zé',
+  redirectUrl: 'https://app.exemplo.com/conectado',
+  state: 'valor-que-voce-confere-na-sessao-do-cliente',
+})
+```
+
+```js Node.js (sem o SDK)
+import { createHmac } from 'node:crypto'
+
+const params = {
+  partner_id: partnerId,
+  external_ref: 'lead_123',
+  ts: String(Math.floor(Date.now() / 1000)),
+  // name, redirect_url, state: inclua só os que você usa
+}
+
+const lines = Object.entries(params)
+  .sort(([a], [b]) => (a < b ? -1 : 1))
+  .map(([name, value]) => `${name}=${value}`)
+
+const signature = createHmac('sha256', signingSecret)
+  .update(['routa-partner-link-v1', ...lines].join('\n'))
+  .digest('hex')
+
+const url = `https://app.routa.chat/connect/${partnerId}?${new URLSearchParams({ ...params, signature })}`
+```
+</CodeGroup>
+
+<Note>
+  `buildOnboardingLink` do SDK é uma função pura: ela não faz requisições e valida os parâmetros localmente. Isso importa, porque a Routa responde a todo link inválido com a mesma mensagem, sem dizer o motivo. O SDK é o único lugar onde você descobre por que um valor seria recusado. Ele está marcado como experimental.
+</Note>
+
+## Validade
+
+A Routa aceita o link por **10 minutos** depois de `ts`, e até 60 segundos à frente do relógio dela, para tolerar diferença entre relógios. Dentro dessa janela, o cliente pode abrir o mesmo link mais de uma vez.
+
+Monte o link **quando o cliente clicar**, não antes. Se ele precisa sobreviver por mais tempo, por exemplo em um e-mail, hospede um redirecionador seu que assina no clique.
+
+## A origem do `redirect_url`
+
+O `redirect_url` precisa:
+
+- usar `https`, sem usuário e senha, espaços, caracteres de controle ou barra invertida;
+- ter a origem completa (esquema, host e porta) **igual** a uma origem que você registrou no painel.
+
+A origem é registrada no painel. Chaves de parceiro não registram origens. A Routa confere o endereço quando o link chega e de novo quando a tentativa termina.
+
+## O retorno para o seu site
+
+Quando a tentativa termina, o navegador do cliente é enviado ao seu `redirect_url`. A sua própria query string é preservada, e a Routa acrescenta:
+
+| Parâmetro | Valor |
+| --- | --- |
+| `status` | `completed` ou `failed`. |
+| `project_id` | O id do projeto. |
+| `channel_id` | O id do canal (`chan_...`), só quando existe. |
+| `error` | Um código fechado, só em caso de falha. |
+| `state` | O seu `state`, inalterado, só se você o enviou. |
+
+Se a página foi aberta com `window.open`, ela também envia os mesmos campos para `window.opener`, endereçados à origem registrada do seu `redirect_url`, nunca a `*`:
+
+```js
+window.addEventListener('message', event => {
+  if (event.origin !== 'https://app.routa.chat') return
+  if (event.data?.type !== 'routa:connect') return
+
+  // event.data: { type, status, project_id, channel_id?, error?, state? }
+})
+```
+
+<Warning>
+  Trate o redirecionamento e a mensagem como **dicas**. Qualquer pessoa pode forjar uma requisição ao seu `redirect_url`, e o `window.opener` pode se perder depois da tela de conexão do provedor. Confira o seu `state` com a sessão do cliente e depois [consulte o projeto](/partners/onboarding#4-confirme-o-redirecionamento-é-uma-dica-não-uma-prova) para confirmar o resultado.
+</Warning>
+
+O campo `error` usa estes valores:
+
+| Valor | Significado |
+| --- | --- |
+| `token_exchange_failed` | A autorização do cliente não pôde ser concluída. |
+| `waba_not_found` | Nenhuma conta do WhatsApp Business foi encontrada na autorização. |
+| `phone_not_found` | Nenhum número foi encontrado na autorização. |
+| `phone_already_connected` | Esse número já é um canal. |
+| `phone_registration_failed` | O número não pôde ser registrado. |
+| `unexpected_error` | Erro inesperado. Tente de novo. |
+| `timed_out` | A conexão demorou demais. Tente de novo. |
+
+Nenhuma chave, segredo ou credencial do provedor aparece na URL nem na mensagem.
+
+## Quando o link é recusado
+
+Toda forma de link ruim recebe a **mesma resposta**: o cliente vê "este link não é válido", e qualquer pessoa que teste links recebe o mesmo. Isso inclui:
+
+- `partner_id` desconhecido ou assinatura errada;
+- `ts` fora da janela;
+- `redirect_url` que não é `https` ou não está em uma origem registrada;
+- parâmetro malformado, desconhecido ou repetido;
+- um plano sem a API de parceiros.
+
+Se os seus links são recusados, confira nesta ordem:
+
+1. **O segredo de assinatura em uso.** Depois de uma rotação, o segredo antigo continua válido por 24 horas.
+2. **A string canônica.** Compare com os vetores de teste abaixo.
+3. **O relógio do seu servidor.**
+4. **As origens registradas no painel.**
+
+## Vetores de teste
+
+Use estes dois exemplos para conferir a sua implementação. O segredo de teste é `rt_psign_TESTVECTORSECRET0000000000000000000000`.
+
+**Mínimo.** Parâmetros: `partner_id=ptn_TestPartner0000000000`, `external_ref=lead_123`, `ts=1790000000`.
+
+```text
+routa-partner-link-v1
+external_ref=lead_123
+partner_id=ptn_TestPartner0000000000
+ts=1790000000
+```
+
+`signature = 0676f9f5ee8e76eff763defdac73798afd0b7cf165abb875356ef4f370ff524a`
+
+**Completo.** Acrescenta `name=Acme Ltda`, `redirect_url=https://partner.example/connected?x=1` e `state=opaque:state/42`.
+
+```text
+routa-partner-link-v1
+external_ref=lead_123
+name=Acme Ltda
+partner_id=ptn_TestPartner0000000000
+redirect_url=https://partner.example/connected?x=1
+state=opaque:state/42
+ts=1790000000
+```
+
+`signature = ff77d689a13e1057dda3b87e9f3f4e0788a98568d3022794ea6ecfc7c6dbb90c`
+
+Os dois valores foram calculados com `createHmac('sha256', segredo)` do Node.js sobre as strings acima.

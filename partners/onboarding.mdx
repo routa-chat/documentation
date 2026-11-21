@@ -1,0 +1,189 @@
+---
+title: "Onboarding de um cliente"
+description: "O ciclo completo: crie o projeto do cliente, emita a chave de API, abra o link assinado, confirme a conexão, envie mensagens e apague o projeto."
+---
+
+Este guia segue a ordem em que um parceiro trabalha: do cadastro de um cliente até o número conectado e enviando mensagens. Cada cliente tem **um projeto** e **uma chave de API**. A organização é o seu espaço de trabalho como parceiro.
+
+<Info>
+  Antes de começar, faça no painel os passos de [API de parceiros](/partners/overview#o-que-você-faz-uma-vez-no-painel): perfil de parceiro, origens de redirecionamento e chave de parceiro.
+</Info>
+
+<Warning>
+  Os exemplos de Node.js usam `@routa-chat/sdk/partner`, que é **experimental** e pode mudar em uma versão minor. Rode tudo no seu servidor. A chave de parceiro e o segredo de assinatura nunca vão para o navegador.
+</Warning>
+
+## 1. Crie o projeto do cliente
+
+`POST /v1/partner/projects` cria o projeto. Escopo necessário: `projects:write`.
+
+<CodeGroup>
+```bash cURL
+curl https://api.routa.chat/v1/partner/projects \
+  -H "Authorization: Bearer $ROUTA_PARTNER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Loja do Zé", "external_ref": "lead_123" }'
+```
+
+```ts Node.js
+import { RoutaPartner } from '@routa-chat/sdk/partner'
+
+const partner = new RoutaPartner(process.env['ROUTA_PARTNER_KEY']!)
+
+const { project, created } = await partner.projects.create({
+  name: 'Loja do Zé',
+  externalRef: 'lead_123',
+})
+```
+</CodeGroup>
+
+```json
+{
+  "id": "proj_01J8...",
+  "name": "Loja do Zé",
+  "external_ref": "lead_123",
+  "environment": "live",
+  "created_at": "2026-11-21T13:22:40.812Z"
+}
+```
+
+O `external_ref` é o **seu** id para o cliente. Ele tem de 1 a 128 caracteres entre `A-Z a-z 0-9 . _ : -`, sem espaços. Nunca use um e-mail, um telefone ou um nome. Ele é único na organização e não muda depois de definido.
+
+Repetir a chamada, por uma nova tentativa ou por um segundo clique, devolve o mesmo projeto: `201` na primeira vez e `200` nas seguintes. Na resposta `200`, o `name` enviado é ignorado. No SDK, `created` indica qual dos dois aconteceu.
+
+Se o plano atingiu o limite de projetos, a resposta é `402 project_limit_exceeded`, com o limite em `error.details.limit`. Criar o projeto é opcional: o primeiro link assinado também o cria.
+
+## 2. Emita a chave de API do projeto
+
+`POST /v1/partner/projects/{project_id}/api_keys` emite a chave que o tráfego do cliente usa. Escopo necessário: `api_keys:write`.
+
+<CodeGroup>
+```bash cURL
+curl https://api.routa.chat/v1/partner/projects/proj_01J8.../api_keys \
+  -H "Authorization: Bearer $ROUTA_PARTNER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Loja do Zé", "scopes": ["messages:write", "messages:read"] }'
+```
+
+```ts Node.js
+const key = await partner.projects.apiKeys.create(project.id, {
+  name: 'Loja do Zé',
+  scopes: ['messages:write', 'messages:read'],
+})
+
+// key.secret aparece uma única vez. Guarde-o agora.
+```
+</CodeGroup>
+
+O segredo da chave aparece **uma única vez** na resposta. Guarde-o no seu cofre de segredos. Peça só os escopos de que o cliente precisa, e use `expires_at` e `ip_allowlist` quando fizer sentido. Veja [Escopos de uma chave de API](/authentication).
+
+<Warning>
+  Emitir e rotacionar chaves não aceita `Idempotency-Key`. Se a resposta se perder, uma nova tentativa pode emitir uma segunda chave. Se isso importa para você, não repita essas chamadas automaticamente: no SDK, use `maxRetries: 0` nelas.
+</Warning>
+
+## 3. Assine o link e abra-o
+
+O cliente conecta o número dele em uma página da Routa, aberta por um link assinado por você. Assine o link **no momento em que o cliente clica**, porque ele vale por 10 minutos.
+
+```ts Node.js
+import { buildOnboardingLink } from '@routa-chat/sdk/partner'
+
+const url = await buildOnboardingLink({
+  partnerId: process.env['ROUTA_PARTNER_ID']!, // ptn_…
+  signingSecret: process.env['ROUTA_PARTNER_SIGNING_SECRET']!,
+  externalRef: 'lead_123',
+  redirectUrl: 'https://app.exemplo.com/conectado',
+  state: 'valor-que-voce-confere-na-sessao-do-cliente',
+})
+```
+
+Abra o link com `window.open`, a partir da sua página, ou em uma nova aba. A página que abre é da Routa e depois mostra a tela de conexão do provedor. Essa tela precisa de uma janela ou aba completa e não funciona dentro de um `iframe`.
+
+O formato do link, a assinatura e a verificação passo a passo estão em [Link assinado](/partners/signed-link).
+
+## 4. Confirme: o redirecionamento é uma dica, não uma prova
+
+Quando a tentativa termina, o navegador do cliente volta para o seu `redirect_url` (se o link informou um), com o seu `state` **inalterado**, e com estes parâmetros:
+
+| Parâmetro | Valor |
+| --- | --- |
+| `status` | `completed` ou `failed`. |
+| `project_id` | O id do projeto. |
+| `channel_id` | O id do canal (`chan_...`), só em caso de sucesso. |
+| `error` | Um código fechado, só em caso de falha. Veja [Link assinado](/partners/signed-link#o-retorno-para-o-seu-site). |
+
+Qualquer pessoa pode forjar uma requisição para o seu `redirect_url`. Confira o seu `state` com a sessão do cliente e depois **consulte o projeto e confie só nele**:
+
+<CodeGroup>
+```bash cURL
+curl https://api.routa.chat/v1/partner/projects/proj_01J8... \
+  -H "Authorization: Bearer $ROUTA_PARTNER_KEY"
+```
+
+```ts Node.js
+const detail = await partner.projects.retrieve(project.id)
+const connected = detail.channels.some(channel => channel.status === 'active')
+```
+</CodeGroup>
+
+```json
+{
+  "id": "proj_01J8...",
+  "name": "Loja do Zé",
+  "external_ref": "lead_123",
+  "environment": "live",
+  "created_at": "2026-11-21T13:22:40.812Z",
+  "channels": [{ "id": "chan_01J8...", "status": "active" }]
+}
+```
+
+Nenhuma chave, segredo ou credencial do provedor aparece na URL. Os eventos também chegam ao seu webhook, com o mesmo `project_id`. Se você ainda não tem um webhook, consulte o projeto em intervalos crescentes e com um prazo: o cliente pode nunca terminar.
+
+Para ver os números de todos os clientes de uma vez, use [`GET /v1/partner/channels`](/api-reference/endpoint/partner/list-channels). Ele aceita os filtros `status`, `project_id` e `external_ref`. Para achar os projetos que nunca terminaram o link, use `has_channel=false` em [`GET /v1/partner/projects`](/api-reference/endpoint/partner/list-projects).
+
+## 5. Envie com a chave do projeto e receba tudo em um webhook
+
+Use a chave de API do passo 2 nas rotas de dados de sempre, como `POST /v1/messages`:
+
+```ts Node.js
+import { Routa } from '@routa-chat/sdk'
+
+const routa = new Routa(projectApiKey)
+
+await routa.messages.send({
+  channel: 'chan_01J8...',
+  to: '+5581999999999',
+  text: 'Olá! Seu pedido foi confirmado.',
+})
+```
+
+Para receber os eventos de **todos** os clientes em um só lugar, configure o [webhook da organização](/partners/webhook). Cada evento traz o `project_id` e o `external_ref`, então você roteia pelo seu próprio id, sem manter uma tabela de correspondência.
+
+## 6. Apague o projeto de um cliente para devolver a vaga
+
+O plano limita os projetos da organização. Um link abandonado ou um cliente que saiu ainda conta. Apague o projeto para devolver a vaga.
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE https://api.routa.chat/v1/partner/projects/proj_01J8... \
+  -H "Authorization: Bearer $ROUTA_PARTNER_KEY"
+```
+
+```ts Node.js
+let result = await partner.projects.delete(project.id)
+while (result.status === 'deleting') {
+  result = await partner.projects.delete(project.id)
+}
+```
+</CodeGroup>
+
+Apagar exige o escopo opt-in `projects:delete`, que uma chave nova não tem. A exclusão remove o projeto e tudo o que ele possui: mensagens, templates, eventos, contatos, chaves, endpoints de webhook, arquivos de mídia e os canais desativados, cujos números ficam livres de novo. O plano, a franquia, o log de auditoria e as chaves de parceiro da organização não mudam. Nada é alterado no WhatsApp.
+
+| Resposta | Significado |
+| --- | --- |
+| `204` | O projeto foi apagado. |
+| `202` | O projeto é grande e só uma parte foi apagada. Repita a mesma chamada até receber `204`. |
+| `409 project_not_deletable` | Veja `error.details.reason`: `has_enabled_channel` (há um canal que não está `disabled`) ou `last_project` (a organização não pode ficar sem projetos). |
+| `404 project_not_found` | O projeto não existe ou não foi criado pela API de parceiros. |
+
+Para apagar um projeto que ainda tem um canal, o canal precisa estar `disabled`. Veja [Chaves de parceiro](/partners/partner-keys#apagar-um-canal-desativado).
